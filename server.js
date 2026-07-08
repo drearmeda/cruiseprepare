@@ -24,8 +24,36 @@ app.use(cookieSession({
   secure: isProd
 }));
 
-const DB_URL = process.env.DATABASE_URL;
+const DB_URL = process.env.DATABASE_URL && String(process.env.DATABASE_URL).trim();
 let store;
+let pool = null;
+let initDb = async () => {};
+
+function pgPoolConfig(url) {
+  const isLocal = /@(localhost|127\.0\.0\.1)[:/]/.test(url) || /sslmode=disable/i.test(url);
+  const config = { connectionString: url };
+  if (!isLocal) config.ssl = { rejectUnauthorized: false };
+  return config;
+}
+
+function logDbTarget(url) {
+  if (!url) {
+    console.log('DATABASE_URL not set — using in-memory store');
+    return;
+  }
+  if (url.includes('${')) {
+    console.error('DATABASE_URL looks unresolved — link the database to the web service in DO');
+    return;
+  }
+  try {
+    const u = new URL(url.replace(/^postgres:\/\//, 'postgresql://'));
+    console.log('DATABASE_URL host:', u.hostname);
+  } catch {
+    console.error('DATABASE_URL is set but could not be parsed');
+  }
+}
+
+logDbTarget(DB_URL);
 
 function blankPlan() {
   return {
@@ -61,8 +89,7 @@ function validPassword(p) {
 
 if (DB_URL) {
   const { Pool } = require('pg');
-  const isLocal = /@(localhost|127\.0\.0\.1)[:/]/.test(DB_URL) || /sslmode=disable/.test(DB_URL);
-  const pool = new Pool({ connectionString: DB_URL, ssl: isLocal ? false : { rejectUnauthorized: false } });
+  pool = new Pool(pgPoolConfig(DB_URL));
   pool.on('error', err => console.error('pg pool error (recovering):', err.message));
 
   const initSql = `
@@ -99,7 +126,11 @@ if (DB_URL) {
       updated_at timestamptz not null default now()
     );
   `;
-  pool.query(initSql).catch(err => console.error('table init error:', err.message));
+  async function runInitDb() {
+    await pool.query(initSql);
+    await pool.query('select 1');
+  }
+  initDb = runInitDb;
 
   store = {
     async createUser(username, passwordHash) {
@@ -430,11 +461,33 @@ app.put('/api/plan', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/healthz', (_req, res) => res.json({ ok: true }));
+app.get('/healthz', async (_req, res) => {
+  if (!pool) return res.json({ ok: true, db: 'memory' });
+  try {
+    await pool.query('select 1');
+    res.json({ ok: true, db: 'postgres' });
+  } catch (e) {
+    res.status(503).json({ ok: false, db: 'error', message: e.message });
+  }
+});
 
 app.use('/assets', express.static(path.join(__dirname, 'assets'), { maxAge: '7d' }));
 
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 const port = process.env.PORT || 8080;
-app.listen(port, () => console.log('Cruise Prepare listening on ' + port));
+
+async function start() {
+  if (pool) {
+    try {
+      await initDb();
+      console.log('Postgres ready');
+    } catch (e) {
+      console.error('Postgres startup failed:', e.message);
+      process.exit(1);
+    }
+  }
+  app.listen(port, () => console.log('Cruise Prepare listening on ' + port));
+}
+
+start();
