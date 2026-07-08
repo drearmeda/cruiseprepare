@@ -29,6 +29,8 @@ services:
       # host 'db' is the compose service; sslmode=disable keeps SSL off for local PG
       DATABASE_URL: postgres://cruise:cruise@db:5432/cruise?sslmode=disable
       SESSION_SECRET: local-dev-session-secret
+      ADMIN_SECRET: local-dev-admin-secret
+      ADMIN_NAV_USERNAMES: dremeda
       PORT: "8080"
     ports:
       - "8080:8080"
