@@ -7,13 +7,18 @@ const path = require('path');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const cookieSession = require('cookie-session');
+const { computePlanMetrics, productHints } = require('./plan-metrics');
 
 const app = express();
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
 
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-only-change-me-in-production';
+const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
+const ADMIN_NAV_USERNAMES = (process.env.ADMIN_NAV_USERNAMES || '')
+  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 const isProd = process.env.NODE_ENV === 'production';
+const adminLoginAttempts = new Map();
 
 app.use(cookieSession({
   name: 'cp_sess',
@@ -137,6 +142,7 @@ if (DB_URL) {
       data jsonb not null,
       updated_at timestamptz not null default now()
     );
+    alter table users add column if not exists last_login_at timestamptz;
   `;
   async function runInitDb() {
     await pool.query(initSql);
@@ -214,6 +220,32 @@ if (DB_URL) {
     async getPlan(householdId) {
       const r = await pool.query('select data from plans where household_id = $1', [householdId]);
       return r.rows[0] ? r.rows[0].data : null;
+    },
+    async touchLogin(userId) {
+      await pool.query('update users set last_login_at = now() where id = $1', [userId]);
+    },
+    async getAdminDashboard() {
+      const usersR = await pool.query(`
+        select count(*)::int as users,
+               count(*) filter (where last_login_at > now() - interval '7 days')::int as users_active_7d
+        from users
+      `);
+      const rowsR = await pool.query(`
+        select h.id, h.name, h.created_at,
+               p.updated_at, p.data,
+               coalesce(
+                 json_agg(json_build_object('username', u.username, 'role', hm.role)
+                   order by hm.role desc, u.username)
+                 filter (where u.id is not null), '[]'
+               ) as members
+        from households h
+        left join plans p on p.household_id = h.id
+        left join household_members hm on hm.household_id = h.id
+        left join users u on u.id = hm.user_id
+        group by h.id, h.name, h.created_at, p.updated_at, p.data
+        order by h.created_at
+      `);
+      return { users: usersR.rows[0], households: rowsR.rows };
     }
   };
   console.log('Persistence: Postgres');
@@ -285,6 +317,28 @@ if (DB_URL) {
     },
     async getPlan(householdId) {
       return plans.has(householdId) ? plans.get(householdId) : null;
+    },
+    async touchLogin() {},
+    async getAdminDashboard() {
+      const householdRows = [];
+      for (const h of households.values()) {
+        const mems = [];
+        for (const m of members.values()) {
+          if (m.household_id !== h.id) continue;
+          const u = users.get(m.user_id);
+          if (u) mems.push({ username: u.username, role: m.role });
+        }
+        mems.sort((a, b) => (a.role === b.role ? a.username.localeCompare(b.username) : a.role === 'owner' ? -1 : 1));
+        householdRows.push({
+          id: h.id,
+          name: h.name,
+          created_at: null,
+          updated_at: null,
+          data: plans.get(h.id) || null,
+          members: mems
+        });
+      }
+      return { users: { users: users.size, users_active_7d: 0 }, households: householdRows };
     }
   };
   console.log('Persistence: in-memory (no DATABASE_URL — data resets on restart)');
@@ -315,9 +369,73 @@ async function requireAuth(req, res, next) {
   }
 }
 
+function showAdminLink(username) {
+  return ADMIN_NAV_USERNAMES.includes(normalizeUsername(username));
+}
+
+function requireAdmin(req, res, next) {
+  if (!ADMIN_SECRET) return res.status(503).json({ error: 'admin not configured' });
+  if (req.session && req.session.isAdmin) return next();
+  return res.status(401).json({ error: 'admin required' });
+}
+
+function adminRateLimit(req) {
+  const ip = req.ip || 'unknown';
+  const now = Date.now();
+  const entry = adminLoginAttempts.get(ip) || { count: 0, reset: now + 60000 };
+  if (now > entry.reset) {
+    entry.count = 0;
+    entry.reset = now + 60000;
+  }
+  entry.count++;
+  adminLoginAttempts.set(ip, entry);
+  return entry.count <= 10;
+}
+
+function buildAdminStats(raw) {
+  const now = Date.now();
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+  const households = raw.households.map(row => {
+    const members = Array.isArray(row.members) ? row.members : [];
+    const memberCount = members.length;
+    const metrics = computePlanMetrics(row.data);
+    const lastActive = row.updated_at ? new Date(row.updated_at).toISOString() : null;
+    const activeRecent = row.updated_at && (now - new Date(row.updated_at).getTime()) < weekMs;
+    const h = {
+      id: row.id,
+      name: row.name,
+      members: members.map(m => m.username),
+      memberCount,
+      createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+      lastActive,
+      activeRecent,
+      ...metrics
+    };
+    h.hints = productHints(h);
+    return h;
+  });
+
+  const singleAdult = households.filter(h => h.memberCount === 1).length;
+  const activeLast7d = households.filter(h => h.activeRecent).length;
+  const packingSum = households.reduce((s, h) => s + h.packingPct, 0);
+
+  return {
+    summary: {
+      households: households.length,
+      users: raw.users.users,
+      usersActive7d: raw.users.users_active_7d,
+      singleAdultHouseholds: singleAdult,
+      activeLast7d,
+      avgPackingPct: households.length ? Math.round(packingSum / households.length) : 0
+    },
+    households
+  };
+}
+
 async function mePayload(user, household) {
   const members = await store.membersOf(household.id);
   return {
+    showAdminLink: showAdminLink(user.username),
     user: { id: user.id, username: user.username },
     household: {
       id: household.id,
@@ -423,6 +541,7 @@ app.post('/api/auth/login', async (req, res) => {
     if (!ok) return res.status(401).json({ error: 'invalid username or password' });
     const mem = await store.membershipForUser(user.id);
     if (!mem) return res.status(401).json({ error: 'no household' });
+    await store.touchLogin(user.id);
     req.session.userId = user.id;
     const payload = await mePayload(
       { id: user.id, username: user.username },
@@ -469,6 +588,39 @@ app.put('/api/plan', requireAuth, async (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     console.error('PUT plan error:', e.message);
+    res.status(500).json({ error: 'server error' });
+  }
+});
+
+// --- Admin ---
+app.get('/admin', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'admin.html'));
+});
+
+app.get('/api/admin/session', (req, res) => {
+  res.json({ ok: !!(req.session && req.session.isAdmin) });
+});
+
+app.post('/api/admin/login', (req, res) => {
+  if (!ADMIN_SECRET) return res.status(503).json({ error: 'admin not configured' });
+  if (!adminRateLimit(req)) return res.status(429).json({ error: 'too many attempts' });
+  const secret = req.body && req.body.secret;
+  if (secret !== ADMIN_SECRET) return res.status(401).json({ error: 'invalid secret' });
+  req.session.isAdmin = true;
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/logout', (req, res) => {
+  if (req.session) req.session.isAdmin = false;
+  res.json({ ok: true });
+});
+
+app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
+  try {
+    const raw = await store.getAdminDashboard();
+    res.json(buildAdminStats(raw));
+  } catch (e) {
+    console.error('admin stats error:', e.message);
     res.status(500).json({ error: 'server error' });
   }
 });

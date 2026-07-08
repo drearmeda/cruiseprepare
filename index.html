@@ -58,6 +58,8 @@
 
   .nav-foot{padding:10px;border-top:1px solid rgba(255,255,255,.1);display:flex;flex-direction:column;gap:4px}
   .nav-foot .nav-item.secondary{color:rgba(255,255,255,.7);font-weight:500;font-size:.85rem}
+  a.nav-item.secondary{text-decoration:none;display:flex;align-items:center;gap:12px;width:100%;border:none;background:transparent;padding:11px 12px;border-radius:10px;cursor:pointer;text-align:left}
+  a.nav-item.secondary:hover{background:rgba(255,255,255,.08);color:#fff}
   .nav-foot .who{font-size:.72rem;color:rgba(255,255,255,.55);padding:4px 12px 8px;line-height:1.35;overflow:hidden;text-overflow:ellipsis}
   .nav.is-collapsed .nav-foot .who{display:none}
 
@@ -348,6 +350,7 @@
     </nav>
     <div class="nav-foot">
       <div class="who" id="nav-who"></div>
+      <a href="/admin" class="nav-item secondary hidden" id="nav-admin"><span class="ico">📊</span><span class="txt">Admin</span></a>
       <button type="button" class="nav-item secondary" onclick="openInvite()"><span class="ico">✉️</span><span class="txt">Invite adult</span></button>
       <button type="button" class="nav-item secondary" onclick="doLogout()"><span class="ico">🚪</span><span class="txt">Log out</span></button>
     </div>
@@ -543,6 +546,8 @@ function renderAcct(){
   if(!meInfo)return;
   const h=meInfo.household;
   const who=document.getElementById('nav-who');
+  const adminEl=document.getElementById('nav-admin');
+  if(adminEl)adminEl.classList.toggle('hidden',!meInfo.showAdminLink);
   if(who){
     const adults=(h.members||[]).map(m=>m.username).join(', ')||meInfo.user.username;
     who.innerHTML='<b>'+esc(h.name)+'</b><br>'+esc(meInfo.user.username)+' · '+esc(adults);

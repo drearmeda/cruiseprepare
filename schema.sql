@@ -6,7 +6,8 @@ create table if not exists users (
   id            serial primary key,
   username      text not null unique,
   password_hash text not null,
-  created_at    timestamptz not null default now()
+  created_at    timestamptz not null default now(),
+  last_login_at timestamptz
 );
 
 create table if not exists households (

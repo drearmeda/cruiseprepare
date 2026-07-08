@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0b2545">
+<title>Cruise Prepare — Admin</title>
+<style>
+  :root{
+    --navy:#0b2545; --blue:#1d6fb8; --sky:#bfe3ff; --bg:#f4f8fc; --card:#fff;
+    --ink:#1a2733; --muted:#64778a; --line:#dce7f1; --green:#1d8a4e; --red:#c0392b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink);min-height:100dvh}
+  .wrap{max-width:1100px;margin:0 auto;padding:24px 16px 48px}
+  .top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+  h1{font-size:1.35rem;color:var(--navy)}
+  .sub{font-size:.85rem;color:var(--muted);margin-top:4px}
+  .top-actions{display:flex;gap:8px;align-items:center}
+  .top-actions a,.top-actions button{
+    font-size:.85rem;padding:8px 12px;border-radius:8px;border:1px solid var(--line);
+    background:#fff;color:var(--navy);text-decoration:none;cursor:pointer;font-weight:600;
+  }
+  .top-actions button.danger{color:var(--red)}
+  .login-card{
+    max-width:360px;margin:80px auto;background:var(--card);border:1px solid var(--line);
+    border-radius:14px;padding:24px;box-shadow:0 4px 20px rgba(11,37,69,.08);
+  }
+  .login-card h2{font-size:1.1rem;color:var(--navy);margin-bottom:12px}
+  .login-card label{display:block;font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;margin:12px 0 6px}
+  .login-card input{width:100%;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:1rem}
+  .login-card button{
+    width:100%;margin-top:16px;background:var(--navy);color:#fff;border:none;border-radius:8px;
+    padding:12px;font-size:1rem;font-weight:700;cursor:pointer;
+  }
+  .err{color:var(--red);font-size:.85rem;margin-top:10px;min-height:1.2em}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .card .k{font-size:.68rem;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700}
+  .card .v{font-size:1.5rem;font-weight:800;color:var(--navy);margin-top:4px}
+  .card .v small{font-size:.85rem;font-weight:600;color:var(--muted)}
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);font-size:.88rem;vertical-align:top}
+  th{background:var(--sky);color:var(--navy);font-size:.72rem;text-transform:uppercase;letter-spacing:.4px}
+  tr:last-child td{border-bottom:none}
+  .hint{display:inline-block;font-size:.68rem;background:#eef6ff;color:#0b5394;border-radius:8px;padding:2px 7px;margin:2px 2px 0 0}
+  .muted{color:var(--muted);font-size:.8rem}
+  .hidden{display:none!important}
+  @media(max-width:700px){
+    table,tbody,thead,tr,td,th{display:block}
+    thead{display:none}
+    tr{border-bottom:1px solid var(--line);padding:8px 0}
+    td{border:none;padding:4px 12px}
+    td::before{content:attr(data-label);display:block;font-size:.68rem;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:2px}
+  }
+</style>
+</head>
+<body>
+<div id="login-view" class="login-card">
+  <h2>Admin</h2>
+  <p class="muted">Product stats for Cruise Prepare</p>
+  <label for="secret">Admin secret</label>
+  <input id="secret" type="password" autocomplete="current-password" placeholder="From ADMIN_SECRET env">
+  <div class="err" id="login-err"></div>
+  <button type="button" id="login-btn">Sign in</button>
+</div>
+
+<div id="dash-view" class="wrap hidden">
+  <div class="top">
+    <div>
+      <h1>Cruise Prepare — Admin</h1>
+      <p class="sub">Adoption &amp; cruise readiness across households</p>
+    </div>
+    <div class="top-actions">
+      <a href="/">← Back to app</a>
+      <button type="button" class="danger" id="logout-btn">Sign out</button>
+    </div>
+  </div>
+  <div class="cards" id="summary-cards"></div>
+  <table>
+    <thead>
+      <tr>
+        <th>Household</th>
+        <th>Adults</th>
+        <th>People</th>
+        <th>Packing</th>
+        <th>Deadlines</th>
+        <th>Outfits</th>
+        <th>Last active</th>
+        <th>Hints</th>
+      </tr>
+    </thead>
+    <tbody id="household-rows"></tbody>
+  </table>
+</div>
+
+<script>
+async function api(path, opts){
+  const r=await fetch(path,Object.assign({credentials:'same-origin',headers:{'Content-Type':'application/json'}},opts||{}));
+  let j=null;try{j=await r.json();}catch(e){}
+  if(!r.ok)throw new Error((j&&j.error)||('HTTP '+r.status));
+  return j;
+}
+function esc(s){const d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;}
+function fmtDate(iso){
+  if(!iso)return '—';
+  const d=new Date(iso);
+  return d.toLocaleDateString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+}
+function renderSummary(s){
+  document.getElementById('summary-cards').innerHTML=[
+    ['Households',s.households],
+    ['Users',s.users],
+    ['Active 7d',s.activeLast7d+' <small>households</small>'],
+    ['Solo adults',s.singleAdultHouseholds],
+    ['Avg packing',s.avgPackingPct+'%']
+  ].map(([k,v])=>'<div class="card"><div class="k">'+esc(k)+'</div><div class="v">'+v+'</div></div>').join('');
+}
+function renderTable(rows){
+  const tb=document.getElementById('household-rows');
+  if(!rows.length){tb.innerHTML='<tr><td colspan="8" class="muted">No households yet</td></tr>';return;}
+  tb.innerHTML=rows.map(h=>{
+    const hints=(h.hints||[]).map(x=>'<span class="hint">'+esc(x)+'</span>').join('')||'<span class="muted">—</span>';
+    return '<tr>'
+      +'<td data-label="Household"><b>'+esc(h.name)+'</b><br><span class="muted">'+esc(h.members.join(', '))+'</span></td>'
+      +'<td data-label="Adults">'+h.memberCount+'</td>'
+      +'<td data-label="People">'+h.peopleCount+'</td>'
+      +'<td data-label="Packing">'+h.packingPct+'% <span class="muted">('+h.packDone+'/'+h.packTotal+')</span></td>'
+      +'<td data-label="Deadlines">'+h.deadlinesDone+'/'+h.deadlinesTotal+'</td>'
+      +'<td data-label="Outfits">'+h.outfitsPct+'%</td>'
+      +'<td data-label="Last active">'+fmtDate(h.lastActive)+'</td>'
+      +'<td data-label="Hints">'+hints+'</td>'
+      +'</tr>';
+  }).join('');
+}
+function showDash(){
+  document.getElementById('login-view').classList.add('hidden');
+  document.getElementById('dash-view').classList.remove('hidden');
+}
+function showLogin(){
+  document.getElementById('dash-view').classList.add('hidden');
+  document.getElementById('login-view').classList.remove('hidden');
+}
+async function loadStats(){
+  const data=await api('/api/admin/stats');
+  renderSummary(data.summary);
+  renderTable(data.households);
+  showDash();
+}
+document.getElementById('login-btn').onclick=async()=>{
+  document.getElementById('login-err').textContent='';
+  try{
+    await api('/api/admin/login',{method:'POST',body:JSON.stringify({secret:document.getElementById('secret').value})});
+    await loadStats();
+  }catch(e){document.getElementById('login-err').textContent=e.message==='invalid secret'?'Invalid secret':e.message;}
+};
+document.getElementById('secret').onkeydown=e=>{if(e.key==='Enter')document.getElementById('login-btn').click();};
+document.getElementById('logout-btn').onclick=async()=>{
+  try{await api('/api/admin/logout',{method:'POST',body:'{}'});}catch(e){}
+  showLogin();
+};
+(async()=>{
+  try{
+    const s=await api('/api/admin/session');
+    if(s.ok)await loadStats();
+  }catch(e){}
+})();
+</script>
+</body>
+</html>
