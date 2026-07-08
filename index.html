@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0b2545">
+<title>Cruise Prepare</title>
+<style>
+  :root{
+    --navy:#0b2545; --blue:#1d6fb8; --sky:#bfe3ff; --gold:#c9a227;
+    --bg:#f4f8fc; --card:#ffffff; --ink:#1a2733; --muted:#64778a;
+    --line:#dce7f1; --green:#1d8a4e; --pink:#c2447e; --red:#c0392b;
+    --nav-w:240px; --nav-w-collapsed:72px; --topbar-h:52px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+  .hidden{display:none!important}
+
+  /* ===== App shell ===== */
+  #app{display:flex;height:100dvh;overflow:hidden;background:var(--bg)}
+  .nav-backdrop{display:none;position:fixed;inset:0;background:rgba(11,37,69,.45);z-index:35}
+  .nav-backdrop.open{display:block}
+
+  .nav{
+    width:var(--nav-w);flex-shrink:0;height:100dvh;background:var(--navy);color:#fff;
+    display:flex;flex-direction:column;z-index:40;transition:width .2s ease;position:relative;
+  }
+  .nav.is-collapsed{width:var(--nav-w-collapsed)}
+  .nav-brand{display:flex;align-items:center;gap:10px;padding:16px 14px;min-height:64px;border-bottom:1px solid rgba(255,255,255,.1)}
+  .nav-brand .mark{
+    width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--blue),#5eb0ef);
+    display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.95rem;flex-shrink:0;
+  }
+  .nav-brand .word{font-weight:800;font-size:1rem;letter-spacing:.2px;white-space:nowrap;overflow:hidden}
+  .nav.is-collapsed .nav-brand{justify-content:center;padding:16px 8px}
+  .nav.is-collapsed .nav-brand .word{display:none}
+
+  .nav-edge-toggle{
+    display:none;position:absolute;right:-14px;top:calc(var(--topbar-h) / 2);transform:translateY(-50%);
+    width:28px;height:28px;border-radius:50%;border:1.5px solid var(--line);background:#fff;color:var(--navy);
+    box-shadow:0 2px 10px rgba(11,37,69,.18);cursor:pointer;z-index:46;
+    align-items:center;justify-content:center;padding:0;font-size:.85rem;font-weight:700;line-height:1;
+  }
+  .nav-edge-toggle:hover{border-color:var(--blue);color:var(--blue);box-shadow:0 3px 12px rgba(29,111,184,.25)}
+
+  .nav-items{flex:1;padding:12px 10px;display:flex;flex-direction:column;gap:4px;overflow-y:auto}
+  .nav-item{
+    display:flex;align-items:center;gap:12px;width:100%;border:none;background:transparent;color:rgba(255,255,255,.82);
+    padding:11px 12px;border-radius:10px;cursor:pointer;font-size:.92rem;font-weight:600;text-align:left;
+  }
+  .nav-item:hover{background:rgba(255,255,255,.08);color:#fff}
+  .nav-item.active{background:#fff;color:var(--navy)}
+  .nav-item .ico{width:22px;text-align:center;font-size:1.05rem;flex-shrink:0}
+  .nav-item .txt{white-space:nowrap;overflow:hidden}
+  .nav.is-collapsed .nav-item{justify-content:center;padding:12px 8px}
+  .nav.is-collapsed .nav-item .txt{display:none}
+
+  .nav-foot{padding:10px;border-top:1px solid rgba(255,255,255,.1);display:flex;flex-direction:column;gap:4px}
+  .nav-foot .nav-item.secondary{color:rgba(255,255,255,.7);font-weight:500;font-size:.85rem}
+  .nav-foot .who{font-size:.72rem;color:rgba(255,255,255,.55);padding:4px 12px 8px;line-height:1.35;overflow:hidden;text-overflow:ellipsis}
+  .nav.is-collapsed .nav-foot .who{display:none}
+
+  .main{flex:1;min-width:0;display:flex;flex-direction:column;height:100dvh;overflow:hidden}
+  .topbar{
+    height:var(--topbar-h);flex-shrink:0;display:flex;align-items:center;gap:12px;
+    padding:0 16px;background:#fff;border-bottom:1px solid var(--line);
+  }
+  .topbar .menu-btn{
+    width:36px;height:36px;border:1px solid var(--line);border-radius:8px;background:#fff;
+    cursor:pointer;font-size:1.1rem;color:var(--navy);display:none;align-items:center;justify-content:center;
+  }
+  .topbar .trip{flex:1;min-width:0;font-size:.82rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .topbar .trip b{color:var(--navy);font-weight:700}
+  .topbar .savestatus{font-size:.75rem;font-weight:600;color:var(--muted);opacity:0;transition:opacity .2s}
+  .topbar .savestatus.on{opacity:1}
+  .topbar .savestatus.warn{color:var(--red)}
+
+  .stage{flex:1;overflow:auto;text-align:left}
+  .stage-pad{padding:14px 18px 28px;width:100%}
+  .person-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+  .person-row .lbl{font-size:.68rem;text-transform:uppercase;letter-spacing:.55px;color:var(--muted);font-weight:700;margin-bottom:6px}
+  .peoplebar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .peoplebar .chip{padding:6px 14px;border-radius:18px;border:1.5px solid var(--blue);background:#fff;color:var(--blue);cursor:pointer;font-size:.88rem}
+  .peoplebar .chip.active{background:var(--blue);color:#fff;font-weight:600}
+  .peoplebar .chip .x{margin-left:7px;opacity:.6;font-weight:700}
+  .peoplebar .add{border-style:dashed;color:var(--muted);border-color:var(--muted)}
+  .stage-body{display:grid;grid-template-columns:1fr;gap:14px;align-items:start}
+  .stage-body > section{min-width:0}
+
+  /* Invite modal */
+  .modal-backdrop{display:none;position:fixed;inset:0;background:rgba(11,37,69,.45);z-index:50;align-items:flex-end;justify-content:center;padding:0}
+  .modal-backdrop.open{display:flex}
+  .modal{
+    background:#fff;width:100%;max-width:440px;border-radius:16px 16px 0 0;padding:18px 18px 22px;
+    box-shadow:0 -8px 32px rgba(11,37,69,.18);max-height:min(85dvh,520px);overflow:auto;
+  }
+  .modal h2{font-size:1.05rem;color:var(--navy);margin-bottom:4px}
+  .modal .lab{font-size:.68rem;text-transform:uppercase;letter-spacing:.55px;font-weight:700;color:var(--muted);margin-top:12px}
+  .modal .invite-link,.modal .invite-codebox{
+    font-size:.82rem;font-weight:600;color:var(--navy);background:#f4f8fc;border:1px solid var(--line);
+    border-radius:10px;padding:10px 12px;word-break:break-all;margin:6px 0 4px;line-height:1.35;
+  }
+  .modal .invite-codebox{font-size:1.25rem;font-weight:800;letter-spacing:2px;text-align:center}
+  .modal p{font-size:.88rem;color:var(--ink);line-height:1.45;margin:0 0 8px}
+  .modal .muted{color:var(--muted);font-size:.82rem}
+  .modal .actions{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;align-items:center}
+  .modal .actions button{
+    border-radius:10px;padding:10px 14px;font-size:.88rem;font-weight:600;cursor:pointer;border:none;
+    transition:background .15s,transform .1s,box-shadow .15s;
+  }
+  .modal .actions .copy{background:var(--blue);color:#fff}
+  .modal .actions .copy:hover{background:#185e9c;box-shadow:0 2px 10px rgba(29,111,184,.35)}
+  .modal .actions .copy:active{transform:scale(.97)}
+  .modal .actions .secondary{background:#eef4fa;color:var(--navy);border:1px solid var(--line)}
+  .modal .actions .secondary:hover{background:#e2edf8}
+  .modal .actions .close{background:#f0f5fa;color:var(--muted)}
+  .modal .actions .close:hover{background:#e4ebf2;color:var(--ink)}
+  .modal .copy-ok{
+    display:none;align-items:center;gap:5px;font-size:.82rem;font-weight:700;color:var(--green);
+    white-space:nowrap;
+  }
+  .modal .copy-ok.on{display:inline-flex}
+  .modal .copy-ok .chk{
+    width:18px;height:18px;border-radius:50%;background:var(--green);color:#fff;
+    display:inline-flex;align-items:center;justify-content:center;font-size:.7rem;line-height:1;
+  }
+
+  @media(min-width:900px){
+    .nav-edge-toggle{display:flex}
+    .modal-backdrop{align-items:center;padding:24px}
+    .modal{border-radius:16px}
+  }
+  @media(max-width:899px){
+    .nav{
+      position:fixed;left:0;top:0;transform:translateX(-105%);transition:transform .22s ease;
+      width:min(280px,86vw)!important;box-shadow:8px 0 28px rgba(11,37,69,.25);
+    }
+    .nav.is-collapsed{width:min(280px,86vw)!important}
+    .nav.is-collapsed .nav-brand .word,
+    .nav.is-collapsed .nav-item .txt,
+    .nav.is-collapsed .nav-foot .who{display:initial}
+    .nav.is-collapsed .nav-item{justify-content:flex-start;padding:11px 12px}
+    .nav.is-collapsed .nav-brand{justify-content:flex-start;padding:16px 14px}
+    .nav.drawer-open{transform:translateX(0)}
+    .nav-edge-toggle{display:none!important}
+    .topbar .menu-btn{display:flex}
+  }
+
+  /* Today */
+  .hero{background:linear-gradient(135deg,var(--navy),var(--blue));color:#fff;border-radius:14px;padding:20px 18px;text-align:center;margin-bottom:14px}
+  .hero .big{font-size:2.6rem;font-weight:800;line-height:1}
+  .hero .lab{font-size:1.05rem;font-weight:600;margin-top:4px}
+  .hero .sub{opacity:.9;font-size:.85rem;margin-top:8px}
+  .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+  .tcard{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .tcard .k{font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;margin-bottom:5px}
+  .tcard .v{font-size:.98rem;font-weight:600;color:var(--navy)}
+  .tcard .v.small{font-size:.9rem;font-weight:500;color:var(--ink)}
+  .aboard{display:flex;align-items:center;gap:8px;background:#fdecec;color:var(--red);border:1px solid #f3c9c4;border-radius:10px;padding:9px 12px;font-weight:700;font-size:.9rem;margin-bottom:14px}
+  .sectitle{font-size:.8rem;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:700;margin:4px 2px 8px}
+  .dlbox{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:6px 14px 10px;margin-bottom:14px}
+  .dl{display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:1px dotted var(--line);font-size:.92rem}
+  .dl:last-child{border-bottom:none}
+  .dl input{width:18px;height:18px;accent-color:var(--green);cursor:pointer;flex-shrink:0}
+  .dl label{cursor:pointer;flex:1}
+  .dl.done label{text-decoration:line-through;color:var(--muted)}
+  .dl .when{font-size:.7rem;font-weight:700;padding:3px 9px;border-radius:9px;background:var(--sky);color:#0b5394;white-space:nowrap}
+  .dl.soon .when{background:#ffe6d6;color:#a2500f}
+  .dl.today .when{background:#ffd9d9;color:var(--red)}
+  .dl.over .when{background:#f0f0f0;color:#888}
+  .quicklinks{display:flex;gap:10px;margin-bottom:14px}
+  .quicklinks button{flex:1;background:#fff;border:1px solid var(--blue);color:var(--blue);border-radius:10px;padding:12px;font-size:.92rem;font-weight:600;cursor:pointer}
+
+  /* Day cards */
+  .day{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:14px;overflow:hidden;box-shadow:0 1px 3px rgba(11,37,69,.06)}
+  .day-head{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--sky);flex-wrap:wrap}
+  .day-head .date{font-weight:700;color:var(--navy);min-width:86px}
+  .day-head input.label{flex:1;min-width:160px;border:none;background:transparent;font-size:.95rem;color:var(--navy);font-weight:600;border-bottom:1px dashed rgba(11,37,69,.35);padding:2px 4px}
+  .badge{font-size:.7rem;padding:3px 9px;border-radius:10px;font-weight:700;letter-spacing:.4px;white-space:nowrap}
+  .b-travel{background:#e8d9f5;color:#5b2d86}.b-sea{background:#d4ecff;color:#0b5394}.b-port{background:#d9f2e2;color:#146c3c}.b-quince{background:#fbe3ef;color:var(--pink)}
+  .formal-toggle{font-size:.75rem;display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--navy);white-space:nowrap}
+  .day.formal .day-head{background:linear-gradient(90deg,var(--sky),#f7e9c4)}
+  .day.formal .formal-toggle{color:#8a6d00;font-weight:700}
+  .slots{padding:8px 14px 12px}
+  .slot{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dotted var(--line)}
+  .slot:last-child{border-bottom:none}
+  .slot .icon{width:26px;text-align:center;font-size:1rem}
+  .slot .name{width:74px;font-size:.78rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+  .slot input[type=text]{flex:1;border:1px solid var(--line);border-radius:7px;padding:7px 10px;font-size:.9rem;background:#fbfdff}
+  .slot input[type=text]:focus{outline:2px solid var(--sky);border-color:var(--blue)}
+  .slot input[type=checkbox]{width:19px;height:19px;accent-color:var(--green);cursor:pointer}
+  .slot.done input[type=text]{background:#eef8f1;color:var(--green);text-decoration:line-through}
+  .daynote{width:100%;border:1px solid var(--line);border-radius:7px;padding:6px 10px;font-size:.82rem;margin-top:8px;background:#fffdf5;color:#6b5d20}
+  .dresscode{padding:7px 14px;font-size:.8rem;background:#fdf6ff;color:#5b2d86;border-bottom:1px solid var(--line)}
+
+  .progress{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-bottom:14px;font-size:.9rem}
+  .bar{height:9px;background:var(--line);border-radius:5px;margin-top:7px;overflow:hidden}
+  .bar div{height:100%;background:linear-gradient(90deg,var(--green),#4fc07d);border-radius:5px;transition:width .3s}
+
+  /* Checklist */
+  .cl-section{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:14px;overflow:hidden}
+  .cl-section h3{background:var(--navy);color:#fff;font-size:.9rem;padding:9px 14px;letter-spacing:.5px;display:flex;justify-content:space-between;align-items:center}
+  .cl-section h3 span.count{font-weight:400;font-size:.78rem;opacity:.8}
+  .cl-items{padding:6px 14px 10px;columns:2;column-gap:24px}
+  @media(max-width:620px){.cl-items{columns:1}}
+  .cl-item{display:flex;align-items:center;gap:9px;padding:6px 0;break-inside:avoid;font-size:.92rem}
+  .cl-item input[type=checkbox]{width:18px;height:18px;accent-color:var(--green);cursor:pointer;flex-shrink:0}
+  .cl-item.done label{text-decoration:line-through;color:var(--muted)}
+  .cl-item label{cursor:pointer;flex:1}
+  .stepper{display:inline-flex;align-items:center;gap:6px;flex-shrink:0}
+  .stepper button{width:24px;height:24px;border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer;font-size:1.05rem;line-height:1;color:var(--blue);font-weight:700}
+  .stepper .cnt{min-width:16px;text-align:center;font-weight:700;font-size:.85rem}
+  .stepper .of{color:var(--muted);font-size:.8rem}
+  .needinp{width:40px;border:1px solid var(--line);border-radius:6px;padding:3px;font-size:.8rem;text-align:center;background:#fbfdff}
+  .cl-item.qty{color:var(--ink)}
+  .cl-item.qty.done .nm{text-decoration:line-through;color:var(--muted)}
+  .cl-item .nm{flex:1}
+  .addrow{display:flex;gap:8px;padding:4px 14px 12px}
+  .addrow input{flex:1;border:1px solid var(--line);border-radius:7px;padding:7px 10px;font-size:.88rem}
+  .addrow button{background:var(--blue);color:#fff;border:none;border-radius:7px;padding:7px 14px;cursor:pointer}
+  .tips{background:#fff8e6;border:1px solid #eadfb4;border-radius:12px;padding:14px 16px;font-size:.86rem;line-height:1.5;margin-bottom:14px}
+  .tips b{color:#7a5c00}
+  .toolrow{display:flex;gap:8px;justify-content:flex-end;margin-bottom:10px;flex-wrap:wrap}
+  .toolrow button{background:#fff;border:1px solid var(--line);border-radius:7px;padding:6px 12px;font-size:.8rem;cursor:pointer;color:var(--muted)}
+
+  /* Lander */
+  .lander{
+    min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    position:relative;overflow:hidden;background:#0b2545;padding:28px 16px;
+  }
+  .lander-bg{
+    position:absolute;inset:0;z-index:0;
+    background:#0b2545 url('/assets/lander-bg.png') center / cover no-repeat;
+    opacity:.42;
+  }
+  .lander-bg::after{
+    content:'';position:absolute;inset:0;
+    background:radial-gradient(ellipse 70% 55% at 50% 35%,rgba(11,37,69,.15),rgba(11,37,69,.78));
+  }
+  .lander-panel{position:relative;z-index:1;width:100%;max-width:400px}
+  .lander-brand{text-align:center;color:#fff;margin-bottom:18px;text-shadow:0 2px 18px rgba(0,0,0,.45)}
+  .lander-brand h1{font-size:2rem;letter-spacing:.4px;font-weight:800}
+  .lander-brand p{opacity:.95;margin-top:8px;font-size:.92rem;line-height:1.45}
+  .lander-card{
+    background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.28);border-radius:20px;
+    padding:20px 18px 18px;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+    box-shadow:0 16px 48px rgba(0,0,0,.28);
+  }
+  .lander-tabs{display:flex;gap:4px;padding:4px;margin-bottom:14px;background:rgba(0,0,0,.22);border-radius:12px}
+  .lander-tabs button{
+    flex:1;background:transparent;border:none;border-radius:9px;padding:10px 8px;
+    font-size:.9rem;font-weight:700;color:rgba(255,255,255,.7);cursor:pointer;
+  }
+  .lander-tabs button.on{background:#fff;color:var(--navy);box-shadow:0 2px 10px rgba(0,0,0,.18)}
+  .lander label{display:block;font-size:.68rem;text-transform:uppercase;letter-spacing:.55px;font-weight:700;color:rgba(255,255,255,.78);margin:12px 0 5px}
+  .lander input{
+    width:100%;border:1px solid rgba(255,255,255,.28);border-radius:10px;padding:11px 12px;font-size:1rem;
+    background:rgba(255,255,255,.92);color:var(--ink);
+  }
+  .lander input:focus{outline:2px solid rgba(191,227,255,.85);border-color:transparent}
+  .lander input:disabled{opacity:.55}
+  .lander .err{color:#ffd0d0;font-size:.85rem;margin-top:10px;min-height:1.2em;text-shadow:0 1px 4px rgba(0,0,0,.35)}
+  .lander .go{
+    width:100%;margin-top:16px;background:#fff;color:var(--navy);border:none;border-radius:10px;
+    padding:13px;font-size:1rem;font-weight:800;cursor:pointer;
+  }
+  .lander .go:disabled{opacity:.65;cursor:wait}
+  .lander .hint{font-size:.8rem;color:rgba(255,255,255,.82);margin-top:12px;line-height:1.4;text-align:center}
+  .lander .soft{margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.18)}
+  .lander .checkline{display:flex;align-items:flex-start;gap:8px;margin-top:12px;color:rgba(255,255,255,.9);font-size:.86rem;line-height:1.35}
+  .lander .checkline input{width:16px;height:16px;margin-top:2px;flex-shrink:0;accent-color:var(--blue)}
+  .lander .invite-banner{
+    display:none;margin-bottom:12px;padding:10px 12px;border-radius:12px;
+    background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);
+    color:#fff;font-size:.84rem;line-height:1.4;
+  }
+  .lander .invite-banner.on{display:block}
+  .lander .invite-banner b{letter-spacing:1px}
+</style>
+</head>
+<body>
+<!-- ===== LANDER (signed out) ===== -->
+<div id="lander" class="lander hidden">
+  <div class="lander-bg" aria-hidden="true"></div>
+  <div class="lander-panel">
+    <div class="lander-brand">
+      <h1>Cruise Prepare</h1>
+      <p>Outfit &amp; packing for Lillian &amp; Ava’s Quinceañera cruise</p>
+    </div>
+    <div class="lander-card">
+      <div class="lander-tabs">
+        <button type="button" id="ltab-login" class="on" onclick="showLander('login')">Log in</button>
+        <button type="button" id="ltab-signup" onclick="showLander('signup')">Sign up</button>
+      </div>
+      <div class="invite-banner" id="invite-banner"></div>
+      <form id="form-login" onsubmit="return submitLogin(event)">
+        <label>Username</label>
+        <input name="username" placeholder="you" required autocomplete="username">
+        <label>Password</label>
+        <input name="password" type="password" required autocomplete="current-password">
+        <div class="err" id="err-login"></div>
+        <button class="go" type="submit">Log in</button>
+      </form>
+      <form id="form-signup" class="hidden" onsubmit="return submitSignup(event)">
+        <label>Username</label>
+        <input name="username" placeholder="you" required minlength="3" autocomplete="username">
+        <label>Password</label>
+        <input name="password" type="password" placeholder="at least 8 characters" required minlength="8" autocomplete="new-password">
+        <label>Invite code <span style="font-weight:500;text-transform:none;letter-spacing:0;opacity:.75">(optional)</span></label>
+        <input name="inviteCode" id="signup-invite" placeholder="From your invite link" autocomplete="off" style="text-transform:uppercase" oninput="onSignupInviteChange()">
+        <div id="signup-create-wrap">
+          <label class="checkline"><input type="checkbox" id="signup-create-hh" onchange="onSignupCreateToggle()"> I’m starting a new household</label>
+          <div id="signup-hh-fields" class="hidden">
+            <label>Household name</label>
+            <input name="householdName" id="signup-hh-name" placeholder="e.g. The Garcias" autocomplete="organization">
+          </div>
+        </div>
+        <div class="err" id="err-signup"></div>
+        <button class="go" type="submit">Create account</button>
+        <p class="hint" id="signup-hint">Have an invite link? Paste the code above, or start a new household for your family.</p>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ===== APP (signed in) ===== -->
+<div id="app" class="hidden">
+  <div class="nav-backdrop" id="nav-backdrop" onclick="closeMobileNav()"></div>
+
+  <aside class="nav" id="sidenav" aria-label="Main">
+    <button type="button" class="nav-edge-toggle" id="nav-edge-toggle" onclick="toggleNavCollapse()" title="Collapse sidebar" aria-label="Collapse sidebar">
+      <span id="nav-collapse-ico">‹</span>
+    </button>
+    <div class="nav-brand">
+      <div class="mark" aria-hidden="true">CP</div>
+      <div class="word">Cruise Prepare</div>
+    </div>
+    <nav class="nav-items">
+      <button type="button" class="nav-item active" id="tab-today" onclick="showTab('today')"><span class="ico">🧭</span><span class="txt">Today</span></button>
+      <button type="button" class="nav-item" id="tab-packing" onclick="showTab('packing')"><span class="ico">🧳</span><span class="txt">Packing List</span></button>
+      <button type="button" class="nav-item" id="tab-outfits" onclick="showTab('outfits')"><span class="ico">👗</span><span class="txt">Outfits</span></button>
+    </nav>
+    <div class="nav-foot">
+      <div class="who" id="nav-who"></div>
+      <button type="button" class="nav-item secondary" onclick="openInvite()"><span class="ico">✉️</span><span class="txt">Invite adult</span></button>
+      <button type="button" class="nav-item secondary" onclick="doLogout()"><span class="ico">🚪</span><span class="txt">Log out</span></button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button type="button" class="menu-btn" onclick="openMobileNav()" aria-label="Open menu">☰</button>
+      <div class="trip"><b>Icon of the Seas</b> · Quinceañera cruise · July 16–25, 2026</div>
+      <span class="savestatus" id="savestatus" aria-live="polite"></span>
+    </header>
+
+    <div class="stage">
+      <div class="stage-pad">
+        <div class="person-row">
+          <div>
+            <div class="lbl">Who we’re packing for</div>
+            <div class="peoplebar" id="peoplebar"></div>
+          </div>
+        </div>
+        <div class="stage-body">
+          <section id="view-today"></section>
+          <section id="view-outfits" class="hidden">
+            <div class="progress" id="outfit-progress"></div>
+            <div id="days"></div>
+          </section>
+          <section id="view-packing" class="hidden">
+            <div class="toolrow"><button onclick="resetChecks()">Uncheck all (this person)</button></div>
+            <div class="progress" id="pack-progress"></div>
+            <div id="checklists"></div>
+            <div class="tips">
+              <b>Cruise packing tips (from the travel agency):</b><br>
+              Days on ship or ashore: casual — beachwear, shorts, sundress.<br>
+              <b>Formal evenings:</b> tuxedo, dark suit, or dinner jacket for gentlemen; cocktail dress or gown for ladies.<br>
+              <b>Casual nights:</b> slacks &amp; shirt / casual dresses. No shorts or tank tops at dinner.<br>
+              <b>Carry-on:</b> keep the quinceañera dresses, tuxedos, medication, cameras, and jewelry in a garment/carry-on bag — never checked luggage.<br>
+              Pool &amp; beach towels are provided on board — no need to pack your own.<br>
+              <b>Port days:</b> always check the current all-aboard time at each port and stay on <i>ship's time</i>.
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+</div><!-- /app -->
+
+<div class="modal-backdrop" id="invite-modal" onclick="if(event.target===this)closeInvite()">
+  <div class="modal" role="dialog" aria-labelledby="invite-title">
+    <h2 id="invite-title">Invite an adult</h2>
+    <p>Share the link (opens Sign up attached to your household), or send the code for them to paste on Sign up.</p>
+    <div class="lab">Invite link</div>
+    <div class="invite-link" id="invite-link"></div>
+    <div class="lab">Or invite code</div>
+    <div class="invite-codebox" id="invite-code">————</div>
+    <div class="actions">
+      <button type="button" class="copy" id="btn-copy-link" onclick="copyInviteLink()">Copy link</button>
+      <button type="button" class="secondary" id="btn-copy-code" onclick="copyInviteCode()">Copy code</button>
+      <button type="button" class="close" onclick="closeInvite()">Close</button>
+      <span class="copy-ok" id="invite-copy-ok" aria-live="polite"><span class="chk">✓</span> Copied</span>
+    </div>
+    <p class="muted" style="margin-top:8px">Planning for someone who won’t log in? Use <b>+ Add person</b> on the main screen.</p>
+  </div>
+</div>
+
+<script>
+const API_BASE='';
+const HH_KEY='cp-household-id';
+const NAV_KEY='cp-nav-collapsed';
+
+const DAYS=[
+ {d:'Thu 7/16', date:'2026-07-16', label:'Fly to Miami (American Airlines)', badge:'travel', eve:'Travel / dinner in Miami'},
+ {d:'Fri 7/17', date:'2026-07-17', label:'Miami day — hotel / explore', badge:'travel', eve:'Casual'},
+ {d:'Sat 7/18', date:'2026-07-18', label:'Embark — departs 4:30 PM · Quince rehearsal (girls + parents)', badge:'quince', eve:'Cordoba’s Welcome Party — Casual · Tropical Caribbean theme (Caribbean colors / tropical shirts)'},
+ {d:'Sun 7/19', date:'2026-07-19', label:'Sea day — QUINCEAÑERAS BALL tonight', badge:'quince', eve:'FORMAL — Ball: gowns/cocktail dresses, tuxedos or dark suits (tux for quinceañera’s father)'},
+ {d:'Mon 7/20', date:'2026-07-20', label:'Sea day', badge:'sea', eve:'Smart casual'},
+ {d:'Tue 7/21', date:'2026-07-21', label:'St. Thomas, USVI (8 AM – 6 PM)', badge:'port', aboard:'5:30 PM', eve:'Casual · Caribbean Night dress code'},
+ {d:'Wed 7/22', date:'2026-07-22', label:'San Juan, Puerto Rico (7 AM – 3 PM)', badge:'port', aboard:'2:30 PM', eve:'Casual · Latin Night — WHITE attire'},
+ {d:'Thu 7/23', date:'2026-07-23', label:'Sea day', badge:'sea', eve:'Dress Your Best'},
+ {d:'Fri 7/24', date:'2026-07-24', label:'Perfect Day at CocoCay (8 AM – 5 PM)', badge:'port', aboard:'4:30 PM', eve:'Cordoba’s Farewell Party — Casual · Cuban theme (wear your guayaberas!)'},
+ {d:'Sat 7/25', date:'2026-07-25', label:'Disembark 6 AM → fly home tonight', badge:'travel', eve:'Travel'}
+];
+const SLOTS=[{k:'gym',icon:'🏋️',name:'Gym AM'},{k:'day',icon:'☀️',name:'Day'},{k:'eve',icon:'🌙',name:'Evening'}];
+const BADGES={travel:['b-travel','TRAVEL'],sea:['b-sea','SEA DAY'],port:['b-port','PORT'],quince:['b-quince','QUINCE ✨']};
+
+const DEFAULT_DEADLINES=[
+ {date:'2026-07-08', label:'Verify everyone’s passport is valid (6+ months past return)', done:false},
+ {date:'2026-07-10', label:'Book shore excursions (St. Thomas, San Juan, CocoCay)', done:false},
+ {date:'2026-07-11', label:'Complete online check-in + save the SetSail pass', done:false},
+ {date:'2026-07-11', label:'Print luggage tags', done:false},
+ {date:'2026-07-15', label:'Buy drink / Wi-Fi packages (cheaper before boarding)', done:false},
+ {date:'2026-07-16', label:'Fly to Miami (American Airlines)', done:false},
+ {date:'2026-07-17', label:'Pack the carry-on garment bag: gowns, meds, jewelry, cameras', done:false},
+ {date:'2026-07-18', label:'Arrive at Port of Miami by ~2:00 PM — sail 4:30 PM', done:false}
+];
+
+/* items may be a string (single, checkbox) or [name, qty] (counted) */
+const CHECKLISTS={
+ 'Important Items':['Valid U.S. Passport (everyone!)','Cruise electronic documents & luggage tags','Credit cards & cash','Prescription medication & general medicine','Phone chargers','USB expander plug','Cameras & memory card','Flight confirmations / boarding passes','Hotel confirmation (Miami 7/16–7/18)'],
+ 'Quinceañera Must-Haves':['Quinceañera dress (CARRY-ON garment bag)','Tiara / hair accessories','Jewelry for the celebration','Shoes for the ceremony',['Comfy backup shoes',2],'Steamer or wrinkle-release spray'],
+ 'Theme Nights':['Tropical/Caribbean-color outfit (Sat — Welcome Party)','Ball attire: gown/cocktail dress or tux/dark suit (Sun — Quinceañeras Ball)','Caribbean Night outfit (Tue)','WHITE outfit for Latin Night (Wed)','Dress-your-best outfit (Thu)','Guayabera / Cuban-theme outfit (Fri — Farewell Party)'],
+ 'General List':['Sunglasses','Cosmetics','Perfume/Cologne','Comb/Brush','Blow dryer','Curling/Flat iron','Shampoo','Conditioner','Toothbrush & toothpaste','Razors','Shaving cream','Deodorant','Face creams','Hair gel/spray','Hand lotions','Suntan lotion','After-tan cream','Needles and thread','Plastic bags','Spot remover','Magnetic hooks','Small ziplock bags','Pop-up hamper'],
+ 'His Checklist':[['Bathing suit',2],['Shorts',5],['Casual shirts',7],['Underwear',10],['Socks',8],['Pajamas',2],['Slacks',3],['Dress shirts',3],'Suit','Sweater','Handkerchiefs','Ties, tie clasp, belts','Shoes','Hat/Cap','Tuxedo & accessories'],
+ 'Her Checklist':[['Swimsuit/Cover-up',3],['Shorts/Bermudas',5],['Casual shirts',7],['Lingerie',10],['Hosiery',4],'Robe',['Dresses — casual/formal',5],['Pant suits',2],'Sweater','Belts','Purses','Hats','Shoes','Jewelry']
+};
+function itemName(it){return Array.isArray(it)?it[0]:it;}
+function itemQty(it){return Array.isArray(it)?it[1]:1;}
+
+let meInfo=null;
+let S=blank();
+let pushTimer=null, syncStatus='off';
+
+function cacheKey(){
+  const id=(meInfo&&meInfo.household&&meInfo.household.id)||localStorage.getItem(HH_KEY)||'anon';
+  return 'cp-plan-'+id;
+}
+function blank(){return {v:2,people:['Me'],active:0,outfits:{},labels:{},formal:{3:true,7:true},notes:{},packed:{},need:{},custom:{},deadlines:JSON.parse(JSON.stringify(DEFAULT_DEADLINES))};}
+function loadLocal(){
+  let s=null;
+  try{s=JSON.parse(localStorage.getItem(cacheKey()));}catch(e){}
+  if(!s||!s.people)return blank();
+  return normalize(s);
+}
+function normalize(s){
+  const b=blank();
+  const legacyChecks=(s.v!==2&&s.checks)?s.checks:null;
+  const legacyCustom=(s.v!==2&&s.custom&&Array.isArray(Object.values(s.custom)[0]||[])&&!String(Object.keys(s.custom)[0]||'').includes('|'))?s.custom:null;
+  for(const k in b){if(s[k]===undefined)s[k]=b[k];}
+  if(!Array.isArray(s.deadlines)||!s.deadlines.length)s.deadlines=b.deadlines;
+  if(legacyChecks){
+    const who=s.people[0];
+    s.packed=s.packed&&Object.keys(s.packed).length?s.packed:{};
+    Object.entries(legacyChecks).forEach(([ck,val])=>{if(val)s.packed[who+'|'+ck]=999;});
+    delete s.checks;
+  }
+  if(legacyCustom){
+    const who=s.people[0];const nc={};
+    Object.entries(legacyCustom).forEach(([sec,arr])=>{nc[who+'|'+sec]=arr;});
+    s.custom=nc;
+  }
+  s.v=2;
+  return s;
+}
+function saveLocal(){localStorage.setItem(cacheKey(),JSON.stringify(S));}
+function save(){S._t=Date.now();saveLocal();cloudPush();}
+function me(){return S.people[S.active];}
+
+function cloudOn(){return location.protocol==='http:'||location.protocol==='https:';}
+function setSync(s){syncStatus=s;renderAcct();}
+
+async function api(path, opts){
+  const r=await fetch(API_BASE+path,Object.assign({credentials:'same-origin',headers:{'Content-Type':'application/json'}},opts||{}));
+  let j=null;
+  try{j=await r.json();}catch(e){}
+  if(!r.ok){
+    const err=new Error((j&&j.error)||('HTTP '+r.status));
+    err.status=r.status;
+    throw err;
+  }
+  return j;
+}
+
+async function cloudPull(){
+  if(!cloudOn()||!meInfo){setSync('off');return;}
+  setSync('syncing');
+  try{
+    const j=await api('/api/plan');
+    if(j&&j.data&&(j.data._t||0)>=(S._t||0)){
+      S=normalize(j.data);saveLocal();renderAll();showTab(currentTab);
+    }
+    setSync('synced');
+  }catch(e){
+    if(e.status===401){showSignedOut();return;}
+    if(e.status===404){setSync('synced');return;}
+    setSync('offline');
+  }
+}
+function cloudPush(){
+  if(!cloudOn()||!meInfo)return;
+  setSync('syncing');
+  clearTimeout(pushTimer);
+  pushTimer=setTimeout(async()=>{
+    try{
+      await api('/api/plan',{method:'PUT',body:JSON.stringify({data:S})});
+      setSync('synced');
+    }catch(e){
+      if(e.status===401){showSignedOut();return;}
+      setSync('offline');
+    }
+  },800);
+}
+
+function renderAcct(){
+  if(!meInfo)return;
+  const h=meInfo.household;
+  const who=document.getElementById('nav-who');
+  if(who){
+    const adults=(h.members||[]).map(m=>m.username).join(', ')||meInfo.user.username;
+    who.innerHTML='<b>'+esc(h.name)+'</b><br>'+esc(meInfo.user.username)+' · '+esc(adults);
+  }
+  refreshInviteModalFields();
+  renderSaveStatus();
+}
+function inviteUrl(code){
+  return location.origin+'/?invite='+encodeURIComponent(code||'');
+}
+function refreshInviteModalFields(){
+  if(!meInfo)return;
+  const code=meInfo.household.inviteCode||'';
+  const linkEl=document.getElementById('invite-link');
+  const codeEl=document.getElementById('invite-code');
+  if(linkEl) linkEl.textContent=inviteUrl(code);
+  if(codeEl) codeEl.textContent=code||'————';
+}
+function renderSaveStatus(){
+  const el=document.getElementById('savestatus');if(!el)return;
+  if(syncStatus==='syncing'){el.textContent='Saving…';el.className='savestatus on';}
+  else if(syncStatus==='offline'){el.textContent='Offline — will retry';el.className='savestatus on warn';}
+  else if(syncStatus==='synced'){el.textContent='Saved';el.className='savestatus on';setTimeout(()=>{if(syncStatus==='synced')el.classList.remove('on');},1600);}
+  else{el.textContent='';el.className='savestatus';}
+}
+
+function applyNavCollapsed(collapsed){
+  const nav=document.getElementById('sidenav');
+  if(!nav)return;
+  nav.classList.toggle('is-collapsed',!!collapsed);
+  const ico=document.getElementById('nav-collapse-ico');
+  if(ico) ico.textContent=collapsed?'›':'‹';
+  const edge=document.getElementById('nav-edge-toggle');
+  if(edge) edge.title=collapsed?'Expand sidebar':'Collapse sidebar';
+}
+function toggleNavCollapse(){
+  if(window.matchMedia('(max-width:899px)').matches)return;
+  const next=!document.getElementById('sidenav').classList.contains('is-collapsed');
+  localStorage.setItem(NAV_KEY, next?'1':'0');
+  applyNavCollapsed(next);
+}
+function openMobileNav(){
+  document.getElementById('sidenav').classList.add('drawer-open');
+  document.getElementById('nav-backdrop').classList.add('open');
+}
+function closeMobileNav(){
+  document.getElementById('sidenav').classList.remove('drawer-open');
+  document.getElementById('nav-backdrop').classList.remove('open');
+}
+function openInvite(){
+  closeMobileNav();
+  refreshInviteModalFields();
+  hideCopyOk();
+  document.getElementById('invite-modal').classList.add('open');
+}
+function closeInvite(){
+  document.getElementById('invite-modal').classList.remove('open');
+  hideCopyOk();
+}
+function hideCopyOk(){
+  const el=document.getElementById('invite-copy-ok');
+  if(el) el.classList.remove('on');
+  clearTimeout(hideCopyOk._t);
+}
+function showCopyOk(){
+  const el=document.getElementById('invite-copy-ok');
+  if(!el)return;
+  el.classList.add('on');
+  clearTimeout(hideCopyOk._t);
+  hideCopyOk._t=setTimeout(hideCopyOk,1800);
+}
+function copyText(text){
+  if(!text) return Promise.reject(new Error('nothing to copy'));
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    return navigator.clipboard.writeText(text);
+  }
+  return new Promise((resolve,reject)=>{
+    try{
+      const ta=document.createElement('textarea');
+      ta.value=text;ta.setAttribute('readonly','');ta.style.position='fixed';ta.style.left='-9999px';
+      document.body.appendChild(ta);ta.select();
+      const ok=document.execCommand('copy');
+      document.body.removeChild(ta);
+      if(ok) resolve(); else reject(new Error('copy failed'));
+    }catch(e){reject(e);}
+  });
+}
+function copyInviteLink(){
+  const url=meInfo?inviteUrl(meInfo.household.inviteCode):'';
+  if(!url)return;
+  copyText(url).then(showCopyOk).catch(()=>{});
+}
+function copyInviteCode(){
+  const code=meInfo&&meInfo.household&&meInfo.household.inviteCode;
+  if(!code)return;
+  copyText(code).then(showCopyOk).catch(()=>{});
+}
+async function doLogout(){
+  closeMobileNav();closeInvite();
+  try{await api('/api/auth/logout',{method:'POST',body:'{}'});}catch(e){}
+  meInfo=null;S=blank();
+  showSignedOut();
+}
+
+/* ---- lander ---- */
+let pendingInvite='';
+function readInviteFromUrl(){
+  try{
+    const q=new URLSearchParams(location.search);
+    const raw=(q.get('invite')||q.get('household')||'').trim().toUpperCase();
+    if(raw) pendingInvite=raw;
+  }catch(e){}
+}
+function clearInviteFromUrl(){
+  try{
+    const u=new URL(location.href);
+    if(u.searchParams.has('invite')||u.searchParams.has('household')){
+      u.searchParams.delete('invite');
+      u.searchParams.delete('household');
+      history.replaceState({},'',u.pathname+(u.hash||''));
+    }
+  }catch(e){}
+}
+function syncInviteBanner(){
+  const b=document.getElementById('invite-banner');
+  if(!b)return;
+  if(pendingInvite){
+    b.classList.add('on');
+    b.innerHTML='Joining household with invite <b>'+esc(pendingInvite)+'</b>. Create your account to continue.';
+  }else{
+    b.classList.remove('on');
+    b.innerHTML='';
+  }
+}
+function onSignupInviteChange(){
+  const inp=document.getElementById('signup-invite');
+  const code=(inp&&inp.value||'').trim().toUpperCase();
+  pendingInvite=code;
+  const createWrap=document.getElementById('signup-create-wrap');
+  const createCb=document.getElementById('signup-create-hh');
+  const hhFields=document.getElementById('signup-hh-fields');
+  const hint=document.getElementById('signup-hint');
+  if(code){
+    if(createCb) createCb.checked=false;
+    if(hhFields) hhFields.classList.add('hidden');
+    if(createWrap) createWrap.classList.add('hidden');
+    if(hint) hint.textContent='You’ll join that household and share the same packing lists.';
+  }else{
+    if(createWrap) createWrap.classList.remove('hidden');
+    if(hint) hint.textContent='Have an invite link? Paste the code above, or start a new household for your family.';
+    onSignupCreateToggle();
+  }
+  syncInviteBanner();
+}
+function onSignupCreateToggle(){
+  const on=document.getElementById('signup-create-hh')&&document.getElementById('signup-create-hh').checked;
+  const hhFields=document.getElementById('signup-hh-fields');
+  const name=document.getElementById('signup-hh-name');
+  if(hhFields) hhFields.classList.toggle('hidden',!on);
+  if(name) name.required=!!on;
+}
+function showLander(which){
+  ['login','signup'].forEach(x=>{
+    const form=document.getElementById('form-'+x);
+    const tab=document.getElementById('ltab-'+x);
+    if(form) form.classList.toggle('hidden',x!==which);
+    if(tab) tab.classList.toggle('on',x===which);
+    const err=document.getElementById('err-'+x);if(err)err.textContent='';
+  });
+  if(which==='signup'){
+    const inp=document.getElementById('signup-invite');
+    if(inp&&pendingInvite) inp.value=pendingInvite;
+    onSignupInviteChange();
+  }
+  syncInviteBanner();
+}
+function showSignedOut(){
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('lander').classList.remove('hidden');
+  readInviteFromUrl();
+  showLander(pendingInvite?'signup':'login');
+}
+function showSignedIn(){
+  document.getElementById('lander').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  clearInviteFromUrl();
+  pendingInvite='';
+  applyNavCollapsed(localStorage.getItem(NAV_KEY)==='1');
+  S=loadLocal();
+  renderAll();
+  showTab('today');
+  renderAcct();
+  cloudPull();
+}
+async function enterSession(payload){
+  meInfo=payload;
+  localStorage.setItem(HH_KEY,String(payload.household.id));
+  showSignedIn();
+}
+async function submitSignup(ev){
+  ev.preventDefault();
+  const f=ev.target, err=document.getElementById('err-signup'), btn=f.querySelector('.go');
+  err.textContent='';btn.disabled=true;
+  const invite=(f.inviteCode.value||pendingInvite||'').trim().toUpperCase();
+  const createHh=document.getElementById('signup-create-hh')&&document.getElementById('signup-create-hh').checked;
+  try{
+    let payload;
+    if(invite){
+      payload=await api('/api/auth/join',{method:'POST',body:JSON.stringify({
+        inviteCode:invite, username:f.username.value, password:f.password.value
+      })});
+    }else if(createHh){
+      const householdName=(document.getElementById('signup-hh-name')||{}).value||'';
+      if(!String(householdName).trim()) throw new Error('Household name required');
+      payload=await api('/api/auth/signup',{method:'POST',body:JSON.stringify({
+        householdName, username:f.username.value, password:f.password.value
+      })});
+    }else{
+      throw new Error('Enter an invite code, or check “I’m starting a new household”.');
+    }
+    pendingInvite='';
+    await enterSession(payload);
+  }catch(e){err.textContent=e.message||'Could not create account';}
+  btn.disabled=false;return false;
+}
+async function submitLogin(ev){
+  ev.preventDefault();
+  const f=ev.target, err=document.getElementById('err-login'), btn=f.querySelector('.go');
+  err.textContent='';btn.disabled=true;
+  try{
+    const payload=await api('/api/auth/login',{method:'POST',body:JSON.stringify({
+      username:f.username.value, password:f.password.value
+    })});
+    await enterSession(payload);
+  }catch(e){err.textContent=e.message||'Could not log in';}
+  btn.disabled=false;return false;
+}
+
+let currentTab='today';
+function showTab(t){
+  currentTab=t;
+  ['today','packing','outfits'].forEach(x=>{
+    document.getElementById('view-'+x).classList.toggle('hidden',x!==t);
+    document.getElementById('tab-'+x).classList.toggle('active',x===t);
+  });
+  if(t==='today')renderToday();
+  closeMobileNav();
+  const stage=document.querySelector('.stage');
+  if(stage) stage.scrollTop=0;
+}
+
+/* ---- people ---- */
+function renderPeople(){
+  const bar=document.getElementById('peoplebar');bar.innerHTML='';
+  S.people.forEach((p,i)=>{
+    const c=document.createElement('button');c.className='chip'+(i===S.active?' active':'');
+    c.innerHTML=esc(p)+(S.people.length>1?'<span class="x" onclick="event.stopPropagation();removePerson('+i+')">×</span>':'');
+    c.onclick=()=>{S.active=i;save();renderAll();};
+    bar.appendChild(c);
+  });
+  const add=document.createElement('button');add.className='chip add';add.textContent='+ Add person';
+  add.onclick=()=>{const n=prompt('Who are we packing for? (e.g. Shelly, kids, Grandpa)');if(n&&n.trim()){S.people.push(n.trim());S.active=S.people.length-1;save();renderAll();}};
+  bar.appendChild(add);
+}
+function removePerson(i){
+  if(!confirm('Remove '+S.people[i]+' and their entries?'))return;
+  const name=S.people[i];S.people.splice(i,1);
+  [S.outfits,S.packed,S.need].forEach(o=>Object.keys(o).forEach(k=>{if(k.startsWith(name+'|'))delete o[k];}));
+  Object.keys(S.custom).forEach(k=>{if(k.startsWith(name+'|'))delete S.custom[k];});
+  if(S.active>=S.people.length)S.active=0;
+  save();renderAll();
+}
+
+/* ---- date helpers ---- */
+function today0(){const n=new Date();n.setHours(0,0,0,0);return n;}
+function daysUntil(iso){return Math.round((new Date(iso+'T00:00:00')-today0())/86400000);}
+function fmtWhen(n){if(n<0)return Math.abs(n)+'d ago';if(n===0)return'Today';if(n===1)return'Tomorrow';return'in '+n+'d';}
+
+/* ---- TODAY ---- */
+function renderToday(){
+  const wrap=document.getElementById('view-today');
+  const idx=DAYS.findIndex(d=>daysUntil(d.date)===0);
+  const toSail=daysUntil('2026-07-18');
+  let html='';
+  if(idx>=0){ /* on the cruise */
+    const day=DAYS[idx];const[bc,bt]=BADGES[day.badge];
+    html+=`<div class="hero"><div class="big">Day ${idx+1}</div><div class="lab">${esc(day.d.split(' ')[0])} · ${esc(stripDate(day.label))}</div><div class="sub">Icon of the Seas · Eastern Caribbean</div></div>`;
+    if(day.aboard)html+=`<div class="aboard">⏰ All aboard ${esc(day.aboard)} — stay on ship's time so you don't miss the ship</div>`;
+    html+=`<div class="grid2">
+      <div class="tcard"><div class="k">🌙 Tonight</div><div class="v small">${esc(day.eve)}</div></div>
+      <div class="tcard"><div class="k">📅 What's the day</div><div class="v"><span class="badge ${bc}">${bt}</span></div></div>
+    </div>`;
+    html+=todayOutfitCard(idx);
+    if(idx+1<DAYS.length){const nx=DAYS[idx+1];html+=`<div class="tcard" style="margin-bottom:14px"><div class="k">↪ Tomorrow</div><div class="v small">${esc(nx.d)} — ${esc(stripDate(nx.label))}</div></div>`;}
+  }else if(toSail>0){ /* before */
+    html+=`<div class="hero"><div class="big">${toSail}</div><div class="lab">day${toSail===1?'':'s'} until you sail</div><div class="sub">Departs Port of Miami · Sat July 18, 4:30 PM</div></div>`;
+    html+=`<div class="grid2">
+      <div class="tcard"><div class="k">✈️ Fly to Miami</div><div class="v small">Thu Jul 16 (${fmtWhen(daysUntil('2026-07-16'))})</div></div>
+      <div class="tcard"><div class="k">🧳 Your packing</div><div class="v small" id="today-pack">—</div></div>
+    </div>`;
+    html+=`<div class="sectitle">Before you go</div><div class="dlbox" id="deadlines"></div>`;
+  }else{ /* after */
+    html+=`<div class="hero"><div class="big">🎉</div><div class="lab">Welcome home!</div><div class="sub">Hope the quinceañera cruise was unforgettable</div></div>`;
+    html+=todayOutfitCard(DAYS.length-1);
+  }
+  html+=`<div class="quicklinks"><button onclick="showTab('packing')">🧳 Packing list</button><button onclick="showTab('outfits')">👗 Plan outfits</button></div>`;
+  wrap.innerHTML=html;
+  if(idx<0&&toSail>0){renderDeadlines();const pt=packStats();document.getElementById('today-pack').textContent=pt.done+'/'+pt.total+' packed';}
+}
+function stripDate(s){return s.replace(/\s*\([^)]*\d[^)]*\)/,'').trim();}
+function todayOutfitCard(di){
+  let rows='';
+  SLOTS.forEach(sl=>{const v=S.outfits[me()+'|'+di+'|'+sl.k];if(v&&v.t)rows+=`<div class="v small" style="margin:2px 0">${sl.icon} ${esc(v.t)}${v.d?' ✓':''}</div>`;});
+  if(!rows)rows=`<div class="v small" style="color:var(--muted)">Nothing planned yet — tap “Plan outfits”.</div>`;
+  return `<div class="tcard" style="margin-bottom:14px"><div class="k">👗 ${esc(me())}’s outfits today</div>${rows}</div>`;
+}
+function renderDeadlines(){
+  const box=document.getElementById('deadlines');if(!box)return;box.innerHTML='';
+  const list=S.deadlines.map((d,i)=>({d,i,n:daysUntil(d.date)})).sort((a,b)=>(a.d.done-b.d.done)||(a.n-b.n));
+  list.forEach(({d,i,n})=>{
+    let cls='dl';if(d.done)cls+=' done';else if(n<0)cls+=' over';else if(n===0)cls+=' today';else if(n<=2)cls+=' soon';
+    const row=document.createElement('div');row.className=cls;
+    row.innerHTML=`<input type="checkbox" ${d.done?'checked':''}><label>${esc(d.label)}</label><span class="when">${d.done?'done':fmtWhen(n)}</span>`;
+    row.querySelector('input').onchange=e=>{S.deadlines[i].done=e.target.checked;save();renderDeadlines();};
+    box.appendChild(row);
+  });
+}
+
+/* ---- outfit days ---- */
+function oKey(day,slot){return me()+'|'+day+'|'+slot;}
+function renderDays(){
+  const wrap=document.getElementById('days');wrap.innerHTML='';
+  DAYS.forEach((day,di)=>{
+    const card=document.createElement('div');card.className='day'+(S.formal[di]?' formal':'');
+    const [bc,bt]=BADGES[day.badge];
+    const label=S.labels[di]!==undefined?S.labels[di]:day.label;
+    card.innerHTML=`<div class="day-head">
+      <span class="date">${day.d}</span>
+      <input class="label" value="${esc(label)}" onchange="S.labels[${di}]=this.value;save()">
+      <span class="badge ${bc}">${bt}</span>
+      <label class="formal-toggle"><input type="checkbox" ${S.formal[di]?'checked':''} onchange="S.formal[${di}]=this.checked;save();renderDays()">🎩 Formal night</label>
+    </div><div class="dresscode">🌙 Tonight: ${esc(day.eve)}${day.aboard?' · ⏰ all aboard '+esc(day.aboard):''}</div><div class="slots"></div>`;
+    const slots=card.querySelector('.slots');
+    SLOTS.forEach(sl=>{
+      const k=oKey(di,sl.k);const v=S.outfits[k]||{t:'',d:false};
+      const row=document.createElement('div');row.className='slot'+(v.d?' done':'');
+      row.innerHTML=`<span class="icon">${sl.icon}</span><span class="name">${sl.name}</span>
+        <input type="text" placeholder="${sl.k==='eve'?esc(day.eve):'Outfit…'}" value="${esc(v.t)}">
+        <input type="checkbox" title="Packed" ${v.d?'checked':''}>`;
+      const txt=row.querySelector('input[type=text]'),cb=row.querySelector('input[type=checkbox]');
+      txt.onchange=()=>{S.outfits[k]={t:txt.value,d:cb.checked};save();outfitProgress();};
+      cb.onchange=()=>{S.outfits[k]={t:txt.value,d:cb.checked};row.classList.toggle('done',cb.checked);save();outfitProgress();};
+      slots.appendChild(row);
+    });
+    const note=document.createElement('input');note.className='daynote';note.placeholder='📝 Day note (excursion, dinner reservation, laundry…)';
+    note.value=S.notes[di]||'';note.onchange=()=>{S.notes[di]=note.value;save();};
+    slots.appendChild(note);
+    wrap.appendChild(card);
+  });
+  outfitProgress();
+}
+function outfitProgress(){
+  let total=0,done=0,filled=0;
+  DAYS.forEach((_,di)=>SLOTS.forEach(sl=>{total++;const v=S.outfits[me()+'|'+di+'|'+sl.k];if(v&&v.t)filled++;if(v&&v.d)done++;}));
+  document.getElementById('outfit-progress').innerHTML=
+    `<b>${esc(me())}</b> — ${filled}/${total} outfits planned · ${done} packed<div class="bar"><div style="width:${total?Math.round(100*filled/total):0}%"></div></div>`;
+}
+
+/* ---- packing (per person, with quantities) ---- */
+function needOf(sec,i,item){const k=me()+'|'+sec+'|'+i;return S.need[k]!==undefined?S.need[k]:itemQty(item);}
+function packedOf(sec,i){const k=me()+'|'+sec+'|'+i;const v=S.packed[k];return v===undefined?0:v;}
+function renderChecklists(){
+  const wrap=document.getElementById('checklists');wrap.innerHTML='';
+  Object.entries(CHECKLISTS).forEach(([sec,items])=>{
+    const custom=(S.custom[me()+'|'+sec]||[]);
+    const all=[...items,...custom];
+    const div=document.createElement('div');div.className='cl-section';
+    let checked=0;all.forEach((it,i)=>{const need=needOf(sec,i,it);if(need>0&&packedOf(sec,i)>=need)checked++;});
+    div.innerHTML=`<h3>${esc(sec)} <span class="count">${checked}/${all.length}</span></h3><div class="cl-items"></div>
+      <div class="addrow"><input placeholder="Add item…"><button>Add</button></div>`;
+    const list=div.querySelector('.cl-items');
+    all.forEach((it,i)=>{
+      const name=itemName(it);const need=needOf(sec,i,it);const packed=Math.min(packedOf(sec,i),Math.max(need,1));
+      const k=me()+'|'+sec+'|'+i;
+      const row=document.createElement('div');
+      if(need>1){
+        const doneNow=packed>=need;
+        row.className='cl-item qty'+(doneNow?' done':'');
+        row.innerHTML=`<span class="nm">${esc(name)}</span>
+          <span class="stepper"><button class="minus">−</button><span class="cnt">${packed}</span><button class="plus">+</button>
+          <span class="of">of</span><input class="needinp" type="number" min="1" value="${need}"></span>`;
+        row.querySelector('.minus').onclick=()=>{S.packed[k]=Math.max(0,packedOf(sec,i)-1);save();renderChecklists();};
+        row.querySelector('.plus').onclick=()=>{S.packed[k]=Math.min(need,packedOf(sec,i)+1);save();renderChecklists();};
+        row.querySelector('.needinp').onchange=e=>{const n=Math.max(1,parseInt(e.target.value)||1);S.need[k]=n;if(packedOf(sec,i)>n)S.packed[k]=n;save();renderChecklists();};
+      }else{
+        const doneNow=packedOf(sec,i)>=1;
+        row.className='cl-item'+(doneNow?' done':'');
+        row.innerHTML=`<input type="checkbox" id="c${hash(k)}" ${doneNow?'checked':''}><label for="c${hash(k)}">${esc(name)}</label>`;
+        row.querySelector('input').onchange=e=>{S.packed[k]=e.target.checked?1:0;save();renderChecklists();};
+      }
+      list.appendChild(row);
+    });
+    const inp=div.querySelector('.addrow input'),btn=div.querySelector('.addrow button');
+    btn.onclick=()=>{if(inp.value.trim()){const ck=me()+'|'+sec;(S.custom[ck]=S.custom[ck]||[]).push(inp.value.trim());save();renderChecklists();}};
+    inp.onkeydown=e=>{if(e.key==='Enter')btn.click();};
+    wrap.appendChild(div);
+  });
+  packProgress();
+}
+function packStats(){
+  let total=0,done=0;
+  Object.entries(CHECKLISTS).forEach(([sec,items])=>{
+    const all=[...items,...(S.custom[me()+'|'+sec]||[])];
+    all.forEach((it,i)=>{total++;const need=needOf(sec,i,it);if(need>0&&packedOf(sec,i)>=need)done++;});
+  });
+  return {total,done};
+}
+function packProgress(){
+  const {total,done}=packStats();
+  document.getElementById('pack-progress').innerHTML=
+    `🧳 <b>${esc(me())}</b> — ${done}/${total} packed<div class="bar"><div style="width:${total?Math.round(100*done/total):0}%"></div></div>`;
+}
+function resetChecks(){if(confirm('Uncheck every packing item for '+me()+'?')){Object.keys(S.packed).forEach(k=>{if(k.startsWith(me()+'|'))delete S.packed[k];});save();renderChecklists();}}
+
+/* ---- util ---- */
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
+function hash(s){let h=0;for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))>>>0;return h;}
+
+function renderAll(){renderPeople();renderDays();renderChecklists();renderToday();renderAcct();}
+
+(async function boot(){
+  applyNavCollapsed(localStorage.getItem(NAV_KEY)==='1');
+  readInviteFromUrl();
+  if(!cloudOn()){
+    document.getElementById('lander').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    S=loadLocal();renderAll();showTab('today');
+    return;
+  }
+  try{
+    const payload=await api('/api/me');
+    await enterSession(payload);
+  }catch(e){
+    showSignedOut();
+  }
+})();
+</script>
+</body>
+</html>
