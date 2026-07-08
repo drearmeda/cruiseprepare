@@ -31,9 +31,21 @@ let initDb = async () => {};
 
 function pgPoolConfig(url) {
   const isLocal = /@(localhost|127\.0\.0\.1)[:/]/.test(url) || /sslmode=disable/i.test(url);
-  const config = { connectionString: url };
-  if (!isLocal) config.ssl = { rejectUnauthorized: false };
-  return config;
+  if (isLocal) return { connectionString: url };
+
+  // pg 8.22+ treats sslmode=require in the URL as verify-full, which rejects DO's cert chain.
+  // Strip sslmode from the URL and configure SSL explicitly instead.
+  const normalized = url.replace(/^postgres:\/\//, 'postgresql://');
+  const parsed = new URL(normalized);
+  parsed.searchParams.delete('sslmode');
+  const connectionString = parsed.toString().replace(/^postgresql:\/\//, 'postgres://');
+
+  const ca = process.env.DB_CA_CERT || process.env.CA_CERT;
+  const ssl = ca
+    ? { rejectUnauthorized: true, ca }
+    : { rejectUnauthorized: false };
+
+  return { connectionString, ssl };
 }
 
 function logDbTarget(url) {
