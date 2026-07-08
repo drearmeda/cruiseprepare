@@ -166,6 +166,11 @@
   .dl label{cursor:pointer;flex:1}
   .dl.done label{text-decoration:line-through;color:var(--muted)}
   .dl .when{font-size:.7rem;font-weight:700;padding:3px 9px;border-radius:9px;background:var(--sky);color:#0b5394;white-space:nowrap}
+  .dl .dl-rm{background:none;border:none;color:var(--muted);font-size:1.15rem;cursor:pointer;padding:0 4px;line-height:1;flex-shrink:0}
+  .dl .dl-rm:hover{color:var(--red)}
+  .dlbox .addrow{padding:10px 0 4px;border-top:1px dotted var(--line);margin-top:4px}
+  .dlbox .addrow .dl-date{width:118px;flex:none;font-size:.85rem;border:1px solid var(--line);border-radius:7px;padding:7px 8px}
+  .dlbox .addrow .dl-label{flex:1;border:1px solid var(--line);border-radius:7px;padding:7px 10px;font-size:.88rem}
   .dl.soon .when{background:#ffe6d6;color:#a2500f}
   .dl.today .when{background:#ffd9d9;color:var(--red)}
   .dl.over .when{background:#f0f0f0;color:#888}
@@ -813,6 +818,7 @@ function removePerson(i){
 
 /* ---- date helpers ---- */
 function today0(){const n=new Date();n.setHours(0,0,0,0);return n;}
+function todayIso(){const t=today0();return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0');}
 function daysUntil(iso){return Math.round((new Date(iso+'T00:00:00')-today0())/86400000);}
 function fmtWhen(n){if(n<0)return Math.abs(n)+'d ago';if(n===0)return'Today';if(n===1)return'Tomorrow';return'in '+n+'d';}
 
@@ -860,10 +866,30 @@ function renderDeadlines(){
   list.forEach(({d,i,n})=>{
     let cls='dl';if(d.done)cls+=' done';else if(n<0)cls+=' over';else if(n===0)cls+=' today';else if(n<=2)cls+=' soon';
     const row=document.createElement('div');row.className=cls;
-    row.innerHTML=`<input type="checkbox" ${d.done?'checked':''}><label>${esc(d.label)}</label><span class="when">${d.done?'done':fmtWhen(n)}</span>`;
+    row.innerHTML=`<input type="checkbox" ${d.done?'checked':''}><label>${esc(d.label)}</label><span class="when">${d.done?'done':fmtWhen(n)}</span><button type="button" class="dl-rm" title="Remove">×</button>`;
     row.querySelector('input').onchange=e=>{S.deadlines[i].done=e.target.checked;save();renderDeadlines();};
+    row.querySelector('.dl-rm').onclick=()=>removeDeadline(i);
     box.appendChild(row);
   });
+  const add=document.createElement('div');add.className='addrow';
+  add.innerHTML=`<input type="date" class="dl-date" value="${todayIso()}"><input class="dl-label" placeholder="Add a task…"><button type="button">Add</button>`;
+  const dateInp=add.querySelector('.dl-date'),labelInp=add.querySelector('.dl-label'),btn=add.querySelector('button');
+  const doAdd=()=>{
+    const label=labelInp.value.trim();
+    if(!label)return;
+    S.deadlines.push({date:dateInp.value||todayIso(),label,done:false});
+    labelInp.value='';
+    save();
+    renderDeadlines();
+  };
+  btn.onclick=doAdd;
+  labelInp.onkeydown=e=>{if(e.key==='Enter')doAdd();};
+  box.appendChild(add);
+}
+function removeDeadline(i){
+  S.deadlines.splice(i,1);
+  save();
+  renderDeadlines();
 }
 
 /* ---- outfit days ---- */

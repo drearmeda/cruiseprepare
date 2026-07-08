@@ -6,7 +6,7 @@ region: nyc
 services:
   - name: web
     github:
-      repo: YOUR_GITHUB_USERNAME/cruiseprepare
+      repo: drearmeda/cruiseprepare
       branch: main
       deploy_on_push: true
     build_command: npm install
