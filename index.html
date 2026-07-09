@@ -85,8 +85,24 @@
   .peoplebar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
   .peoplebar .chip{padding:6px 14px;border-radius:18px;border:1.5px solid var(--blue);background:#fff;color:var(--blue);cursor:pointer;font-size:.88rem}
   .peoplebar .chip.active{background:var(--blue);color:#fff;font-weight:600}
+  .peoplebar .chip .lock{margin-left:5px;opacity:.75;font-size:.75rem}
   .peoplebar .chip .x{margin-left:7px;opacity:.6;font-weight:700}
   .peoplebar .add{border-style:dashed;color:var(--muted);border-color:var(--muted)}
+  .viewonly-banner{
+    background:#eef4fa;border:1px solid var(--line);border-radius:10px;padding:10px 14px;
+    font-size:.88rem;color:var(--navy);margin-bottom:14px;line-height:1.4;
+  }
+  .sharing-section{margin-bottom:18px}
+  .sharing-section h3{font-size:.92rem;color:var(--navy);margin:0 0 8px}
+  .sharing-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:.9rem}
+  .sharing-row:last-child{border-bottom:none}
+  .sharing-row input{width:18px;height:18px;accent-color:var(--blue);cursor:pointer;flex-shrink:0}
+  .sharing-row label{cursor:pointer;flex:1}
+  .sharing-sub{font-size:.78rem;color:var(--muted);margin:0 0 6px}
+  .readonly .cl-item input,.readonly .cl-item button,.readonly .cl-item .needinp,
+  .readonly .slot input,.readonly .day-head input,.readonly .formal-toggle input,
+  .readonly .daynote,.readonly .addrow input,.readonly .addrow button{pointer-events:none;opacity:.65}
+  .readonly .toolrow button{pointer-events:none;opacity:.5}
   .stage-body{display:grid;grid-template-columns:1fr;gap:14px;align-items:start}
   .stage-body > section{min-width:0}
 
@@ -351,6 +367,7 @@
     <div class="nav-foot">
       <div class="who" id="nav-who"></div>
       <a href="/admin" class="nav-item secondary hidden" id="nav-admin"><span class="ico">📊</span><span class="txt">Admin</span></a>
+      <button type="button" class="nav-item secondary" onclick="openSharing()"><span class="ico">🔐</span><span class="txt">Sharing</span></button>
       <button type="button" class="nav-item secondary" onclick="openInvite()"><span class="ico">✉️</span><span class="txt">Invite adult</span></button>
       <button type="button" class="nav-item secondary" onclick="doLogout()"><span class="ico">🚪</span><span class="txt">Log out</span></button>
     </div>
@@ -371,7 +388,8 @@
             <div class="peoplebar" id="peoplebar"></div>
           </div>
         </div>
-        <div class="stage-body">
+        <div class="viewonly-banner hidden" id="viewonly-banner"></div>
+        <div class="stage-body" id="stage-body">
           <section id="view-today"></section>
           <section id="view-outfits" class="hidden">
             <div class="progress" id="outfit-progress"></div>
@@ -411,7 +429,18 @@
       <button type="button" class="close" onclick="closeInvite()">Close</button>
       <span class="copy-ok" id="invite-copy-ok" aria-live="polite"><span class="chk">✓</span> Copied</span>
     </div>
-    <p class="muted" style="margin-top:8px">Planning for someone who won’t log in? Use <b>+ Add person</b> on the main screen.</p>
+    <p class="muted" style="margin-top:8px">Joining creates your own name tab automatically. Use <b>+ Add person</b> for kids or guests who won’t log in.</p>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="sharing-modal" onclick="if(event.target===this)closeSharing()">
+  <div class="modal" role="dialog" aria-labelledby="sharing-title">
+    <h2 id="sharing-title">Sharing</h2>
+    <p>Everyone in your household can <b>view</b> all lists. Check who can <b>edit</b>.</p>
+    <div id="sharing-content"></div>
+    <div class="actions">
+      <button type="button" class="close" onclick="closeSharing()">Close</button>
+    </div>
   </div>
 </div>
 
@@ -461,12 +490,106 @@ function itemQty(it){return Array.isArray(it)?it[1]:1;}
 let meInfo=null;
 let S=blank();
 let pushTimer=null, syncStatus='off';
+let syncReady=false;
 
 function cacheKey(){
   const id=(meInfo&&meInfo.household&&meInfo.household.id)||localStorage.getItem(HH_KEY)||'anon';
   return 'cp-plan-'+id;
 }
-function blank(){return {v:2,people:['Me'],active:0,outfits:{},labels:{},formal:{3:true,7:true},notes:{},packed:{},need:{},custom:{},deadlines:JSON.parse(JSON.stringify(DEFAULT_DEADLINES))};}
+function blank(){return {v:3,people:['Me'],personMeta:{},active:0,outfits:{},labels:{},formal:{3:true,7:true},notes:{},packed:{},need:{},custom:{},deadlines:JSON.parse(JSON.stringify(DEFAULT_DEADLINES))};}
+function ensurePersonMeta(){if(!S.personMeta||typeof S.personMeta!=='object')S.personMeta={};}
+function renamePersonLocal(from,to){
+  if(from===to)return;
+  const i=S.people.indexOf(from);
+  if(i<0)return;
+  S.people[i]=to;
+  if(S.personMeta[from]){S.personMeta[to]=S.personMeta[from];delete S.personMeta[from];}
+  [S.outfits,S.packed,S.need].forEach(o=>{
+    if(!o)return;
+    Object.keys(o).forEach(k=>{
+      if(k.startsWith(from+'|')){o[to+k.slice(from.length)]=o[k];delete o[k];}
+    });
+  });
+  Object.keys(S.custom||{}).forEach(k=>{
+    if(k.startsWith(from+'|')){S.custom[to+k.slice(from.length)]=S.custom[k];delete S.custom[k];}
+  });
+}
+function mergePersonDataLocal(from,to){
+  if(from===to)return;
+  [S.outfits,S.packed,S.need].forEach(o=>{
+    if(!o)return;
+    Object.keys(o).forEach(k=>{
+      if(k.startsWith(from+'|')){
+        const nk=to+k.slice(from.length);
+        if(o[nk]===undefined)o[nk]=o[k];
+        delete o[k];
+      }
+    });
+  });
+  Object.keys(S.custom||{}).forEach(k=>{
+    if(k.startsWith(from+'|')){
+      const nk=to+k.slice(from.length);
+      if(S.custom[nk]===undefined)S.custom[nk]=S.custom[k];
+      delete S.custom[k];
+    }
+  });
+  const idx=S.people.indexOf(from);
+  if(idx>=0)S.people.splice(idx,1);
+}
+function mergeHouseholdMembers(){
+  if(!meInfo)return;
+  ensurePersonMeta();
+  const members=meInfo.household.members||[];
+  const owner=members.find(m=>m.role==='owner')||members[0];
+  if(owner){
+    const meIdx=S.people.indexOf('Me');
+    if(meIdx>=0){
+      if(!S.people.includes(owner.username))renamePersonLocal('Me',owner.username);
+      else mergePersonDataLocal('Me',owner.username);
+    }
+  }
+  members.forEach(m=>{
+    if(!S.people.includes(m.username))S.people.push(m.username);
+    const prev=S.personMeta[m.username]||{};
+    S.personMeta[m.username]={type:'adult',userId:m.id,editGrants:Array.isArray(prev.editGrants)?prev.editGrants:[]};
+  });
+  S.people.forEach(p=>{
+    if(!S.personMeta[p]){
+      S.personMeta[p]={type:'guest',addedBy:owner?owner.id:meInfo.user.id,editGrants:[]};
+    }else if(!Array.isArray(S.personMeta[p].editGrants)){
+      S.personMeta[p].editGrants=[];
+    }
+  });
+  if(S.active>=S.people.length)S.active=Math.max(0,S.people.length-1);
+  S.v=3;
+}
+function canEdit(person){
+  if(!meInfo||!person)return false;
+  const meta=S.personMeta&&S.personMeta[person];
+  if(!meta)return false;
+  const uid=meInfo.user.id;
+  if(meta.type==='adult'&&meta.userId===uid)return true;
+  if(meta.type==='guest'&&meta.addedBy===uid)return true;
+  return(meta.editGrants||[]).includes(uid);
+}
+function canGrant(person){
+  if(!meInfo||!person)return false;
+  const meta=S.personMeta&&S.personMeta[person];
+  if(!meta)return false;
+  const uid=meInfo.user.id;
+  if(meta.type==='adult'&&meta.userId===uid)return true;
+  if(meta.type==='guest'&&meta.addedBy===uid)return true;
+  return false;
+}
+function isReadOnly(){return !canEdit(me());}
+function personIsAdult(name){const m=S.personMeta&&S.personMeta[name];return !!(m&&m.type==='adult');}
+function isLocalBlank(){
+  if(!S||!S.people||!S.people.length)return true;
+  if(S.people.length===1&&S.people[0]==='Me'){
+    return !Object.keys(S.packed||{}).length&&!Object.keys(S.outfits||{}).length;
+  }
+  return false;
+}
 function loadLocal(){
   let s=null;
   try{s=JSON.parse(localStorage.getItem(cacheKey()));}catch(e){}
@@ -490,11 +613,13 @@ function normalize(s){
     Object.entries(legacyCustom).forEach(([sec,arr])=>{nc[who+'|'+sec]=arr;});
     s.custom=nc;
   }
-  s.v=2;
+  if(!s.personMeta||typeof s.personMeta!=='object')s.personMeta={};
+  s.v=3;
   return s;
 }
 function saveLocal(){localStorage.setItem(cacheKey(),JSON.stringify(S));}
-function save(){S._t=Date.now();saveLocal();cloudPush();}
+function save(){if(!syncReady)return;S._t=Date.now();saveLocal();cloudPush();}
+function saveForce(){S._t=Date.now();saveLocal();cloudPush();}
 function me(){return S.people[S.active];}
 
 function cloudOn(){return location.protocol==='http:'||location.protocol==='https:';}
@@ -512,23 +637,42 @@ async function api(path, opts){
   return j;
 }
 
-async function cloudPull(){
+async function cloudPull(isInitial){
   if(!cloudOn()||!meInfo){setSync('off');return;}
   setSync('syncing');
   try{
     const j=await api('/api/plan');
-    if(j&&j.data&&(j.data._t||0)>=(S._t||0)){
-      S=normalize(j.data);saveLocal();renderAll();showTab(currentTab);
+    if(j&&j.data){
+      const serverT=j.data._t||0;
+      const localT=S._t||0;
+      if(isInitial){
+        if(isLocalBlank()||serverT>=localT)S=normalize(j.data);
+        mergeHouseholdMembers();
+        saveLocal();
+      }else if(serverT>=localT){
+        S=normalize(j.data);
+        mergeHouseholdMembers();
+        saveLocal();
+        renderAll();showTab(currentTab);
+      }
     }
+    syncReady=true;
     setSync('synced');
   }catch(e){
     if(e.status===401){showSignedOut();return;}
-    if(e.status===404){setSync('synced');return;}
+    if(e.status===404){
+      mergeHouseholdMembers();
+      saveLocal();
+      syncReady=true;
+      setSync('synced');
+      return;
+    }
+    syncReady=true;
     setSync('offline');
   }
 }
 function cloudPush(){
-  if(!cloudOn()||!meInfo)return;
+  if(!cloudOn()||!meInfo||!syncReady)return;
   setSync('syncing');
   clearTimeout(pushTimer);
   pushTimer=setTimeout(async()=>{
@@ -607,6 +751,70 @@ function closeInvite(){
   document.getElementById('invite-modal').classList.remove('open');
   hideCopyOk();
 }
+function openSharing(){
+  closeMobileNav();
+  renderSharingModal();
+  document.getElementById('sharing-modal').classList.add('open');
+}
+function closeSharing(){
+  document.getElementById('sharing-modal').classList.remove('open');
+}
+function renderSharingModal(){
+  const box=document.getElementById('sharing-content');
+  if(!box||!meInfo)return;
+  box.innerHTML='';
+  const members=meInfo.household.members||[];
+  const myName=meInfo.user.username;
+  const others=members.filter(m=>m.id!==meInfo.user.id);
+
+  const sec1=document.createElement('div');sec1.className='sharing-section';
+  sec1.innerHTML='<h3>Who can edit MY lists ('+esc(myName)+')</h3><p class="sharing-sub">Other adults in your household</p>';
+  if(!others.length){
+    sec1.innerHTML+='<p class="sharing-sub">Invite another adult to share edit access.</p>';
+  }else{
+    others.forEach(m=>{
+      const grants=(S.personMeta[myName]&&S.personMeta[myName].editGrants)||[];
+      const row=document.createElement('div');row.className='sharing-row';
+      row.innerHTML='<input type="checkbox" id="grant-my-'+m.id+'"'+(grants.includes(m.id)?' checked':'')+'><label for="grant-my-'+m.id+'">'+esc(m.username)+'</label>';
+      row.querySelector('input').onchange=e=>{
+        ensurePersonMeta();
+        if(!S.personMeta[myName])S.personMeta[myName]={type:'adult',userId:meInfo.user.id,editGrants:[]};
+        let g=S.personMeta[myName].editGrants||[];
+        if(e.target.checked){if(!g.includes(m.id))g.push(m.id);}
+        else g=g.filter(id=>id!==m.id);
+        S.personMeta[myName].editGrants=g;
+        saveForce();renderAll();
+      };
+      sec1.appendChild(row);
+    });
+  }
+  box.appendChild(sec1);
+
+  const added=S.people.filter(p=>{const meta=S.personMeta[p];return meta&&meta.type==='guest'&&meta.addedBy===meInfo.user.id;});
+  if(added.length){
+    added.forEach(p=>{
+      const sec=document.createElement('div');sec.className='sharing-section';
+      sec.innerHTML='<h3>Who can edit '+esc(p)+'’s lists</h3><p class="sharing-sub">You added this person</p>';
+      others.forEach(m=>{
+        const grants=(S.personMeta[p]&&S.personMeta[p].editGrants)||[];
+        const row=document.createElement('div');row.className='sharing-row';
+        row.innerHTML='<input type="checkbox" id="grant-'+hash(p+'-'+m.id)+'"'+(grants.includes(m.id)?' checked':'')+'><label for="grant-'+hash(p+'-'+m.id)+'">'+esc(m.username)+'</label>';
+        row.querySelector('input').onchange=e=>{
+          ensurePersonMeta();
+          if(!S.personMeta[p])return;
+          let g=S.personMeta[p].editGrants||[];
+          if(e.target.checked){if(!g.includes(m.id))g.push(m.id);}
+          else g=g.filter(id=>id!==m.id);
+          S.personMeta[p].editGrants=g;
+          saveForce();renderAll();
+        };
+        sec.appendChild(row);
+      });
+      if(!others.length)sec.innerHTML+='<p class="sharing-sub">No other adults yet.</p>';
+      box.appendChild(sec);
+    });
+  }
+}
 function hideCopyOk(){
   const el=document.getElementById('invite-copy-ok');
   if(el) el.classList.remove('on');
@@ -646,9 +854,9 @@ function copyInviteCode(){
   copyText(code).then(showCopyOk).catch(()=>{});
 }
 async function doLogout(){
-  closeMobileNav();closeInvite();
+  closeMobileNav();closeInvite();closeSharing();
   try{await api('/api/auth/logout',{method:'POST',body:'{}'});}catch(e){}
-  meInfo=null;S=blank();
+  meInfo=null;S=blank();syncReady=false;
   showSignedOut();
 }
 
@@ -736,16 +944,18 @@ function showSignedIn(){
   clearInviteFromUrl();
   pendingInvite='';
   applyNavCollapsed(localStorage.getItem(NAV_KEY)==='1');
+  syncReady=false;
   S=loadLocal();
-  renderAll();
-  showTab('today');
   renderAcct();
-  cloudPull();
+  cloudPull(true).then(()=>{
+    renderAll();
+    showTab('today');
+  });
 }
 async function enterSession(payload){
   meInfo=payload;
   localStorage.setItem(HH_KEY,String(payload.household.id));
-  showSignedIn();
+  await showSignedIn();
 }
 async function submitSignup(ev){
   ev.preventDefault();
@@ -800,25 +1010,63 @@ function showTab(t){
 }
 
 /* ---- people ---- */
+function renderViewOnlyBanner(){
+  const el=document.getElementById('viewonly-banner');
+  const body=document.getElementById('stage-body');
+  if(!el||!body)return;
+  const ro=isReadOnly();
+  el.classList.toggle('hidden',!ro);
+  body.classList.toggle('readonly',ro);
+  if(ro){
+    const owner=S.personMeta[me()];
+    let who=me();
+    if(owner&&owner.type==='adult'){
+      const m=(meInfo.household.members||[]).find(x=>x.id===owner.userId);
+      if(m)who=m.username;
+    }else if(owner&&owner.type==='guest'){
+      const m=(meInfo.household.members||[]).find(x=>x.id===owner.addedBy);
+      if(m)who=m.username;
+    }
+    el.innerHTML='View only — <b>'+esc(me())+'</b>’s lists. Ask <b>'+esc(who)+'</b> for edit access, or open <button type="button" style="background:none;border:none;color:var(--blue);font-weight:700;cursor:pointer;padding:0" onclick="openSharing()">Sharing</button>.';
+  }
+}
 function renderPeople(){
   const bar=document.getElementById('peoplebar');bar.innerHTML='';
   S.people.forEach((p,i)=>{
     const c=document.createElement('button');c.className='chip'+(i===S.active?' active':'');
-    c.innerHTML=esc(p)+(S.people.length>1?'<span class="x" onclick="event.stopPropagation();removePerson('+i+')">×</span>':'');
-    c.onclick=()=>{S.active=i;save();renderAll();};
+    const lock=!canEdit(p)?' <span class="lock" title="View only">🔒</span>':'';
+    const canRemove=!personIsAdult(p)&&canEdit(p);
+    const rm=canRemove?'<span class="x" onclick="event.stopPropagation();removePerson('+i+')">×</span>':'';
+    c.innerHTML=esc(p)+lock+rm;
+    c.onclick=()=>{S.active=i;saveLocal();renderAll();};
     bar.appendChild(c);
   });
   const add=document.createElement('button');add.className='chip add';add.textContent='+ Add person';
-  add.onclick=()=>{const n=prompt('Who are we packing for? (e.g. Shelly, kids, Grandpa)');if(n&&n.trim()){S.people.push(n.trim());S.active=S.people.length-1;save();renderAll();}};
+  add.onclick=()=>{
+    const n=prompt('Who are we packing for? (e.g. kids, Grandpa — people who won’t log in)');
+    if(n&&n.trim()){
+      const name=n.trim();
+      if(S.people.includes(name)){alert('That name is already in the list.');return;}
+      ensurePersonMeta();
+      S.people.push(name);
+      S.personMeta[name]={type:'guest',addedBy:meInfo.user.id,editGrants:[]};
+      S.active=S.people.length-1;
+      saveForce();renderAll();
+    }
+  };
   bar.appendChild(add);
 }
 function removePerson(i){
-  if(!confirm('Remove '+S.people[i]+' and their entries?'))return;
-  const name=S.people[i];S.people.splice(i,1);
+  const name=S.people[i];
+  if(personIsAdult(name)){alert('Adult accounts cannot be removed here.');return;}
+  if(!canEdit(name)){alert('You don’t have permission to remove this person.');return;}
+  if(!confirm('Remove '+name+' and their entries?'))return;
+  S.people.splice(i,1);
+  delete S.personMeta[name];
   [S.outfits,S.packed,S.need].forEach(o=>Object.keys(o).forEach(k=>{if(k.startsWith(name+'|'))delete o[k];}));
   Object.keys(S.custom).forEach(k=>{if(k.startsWith(name+'|'))delete S.custom[k];});
   if(S.active>=S.people.length)S.active=0;
-  save();renderAll();
+  saveForce();renderAll();
 }
 
 /* ---- date helpers ---- */
@@ -997,7 +1245,7 @@ function resetChecks(){if(confirm('Uncheck every packing item for '+me()+'?')){O
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
 function hash(s){let h=0;for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))>>>0;return h;}
 
-function renderAll(){renderPeople();renderDays();renderChecklists();renderToday();renderAcct();}
+function renderAll(){renderPeople();renderViewOnlyBanner();renderDays();renderChecklists();renderToday();renderAcct();}
 
 (async function boot(){
   applyNavCollapsed(localStorage.getItem(NAV_KEY)==='1');

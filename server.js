@@ -8,6 +8,12 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const cookieSession = require('cookie-session');
 const { computePlanMetrics, productHints } = require('./plan-metrics');
+const {
+  blankPlanForUser,
+  migrateLegacyPlan,
+  mergeHouseholdMembers,
+  validatePlanUpdate
+} = require('./plan-household');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -71,22 +77,6 @@ function logDbTarget(url) {
 }
 
 logDbTarget(DB_URL);
-
-function blankPlan() {
-  return {
-    v: 2,
-    people: ['Me'],
-    active: 0,
-    outfits: {},
-    labels: {},
-    formal: { 3: true, 7: true },
-    notes: {},
-    packed: {},
-    need: {},
-    custom: {},
-    deadlines: []
-  };
-}
 
 function randInvite() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -373,9 +363,24 @@ function showAdminLink(username) {
   return ADMIN_NAV_USERNAMES.includes(normalizeUsername(username));
 }
 
-function requireAdmin(req, res, next) {
-  if (!ADMIN_SECRET) return res.status(503).json({ error: 'admin not configured' });
-  if (req.session && req.session.isAdmin) return next();
+async function hasAdminAccess(req) {
+  if (req.session && req.session.isAdmin) return true;
+  if (!ADMIN_NAV_USERNAMES.length) return false;
+  const userId = req.session && req.session.userId;
+  if (!userId) return false;
+  try {
+    const user = await store.findUserById(userId);
+    return !!(user && showAdminLink(user.username));
+  } catch {
+    return false;
+  }
+}
+
+async function requireAdmin(req, res, next) {
+  if (!ADMIN_SECRET && !ADMIN_NAV_USERNAMES.length) {
+    return res.status(503).json({ error: 'admin not configured' });
+  }
+  if (await hasAdminAccess(req)) return next();
   return res.status(401).json({ error: 'admin required' });
 }
 
@@ -476,7 +481,7 @@ app.post('/api/auth/signup', async (req, res) => {
     }
     if (!household) return res.status(500).json({ error: 'could not create household' });
     await store.addMember(household.id, user.id, 'owner');
-    const plan = blankPlan();
+    const plan = blankPlanForUser(user.username, user.id);
     plan._t = Date.now();
     await store.putPlan(household.id, plan);
 
@@ -514,6 +519,12 @@ app.post('/api/auth/join', async (req, res) => {
     const hash = await bcrypt.hash(password, 10);
     const user = await store.createUser(username, hash);
     await store.addMember(household.id, user.id, 'adult');
+
+    let plan = await store.getPlan(household.id);
+    const members = await store.membersOf(household.id);
+    plan = migrateLegacyPlan(plan || blankPlanForUser(user.username, user.id), members);
+    plan._t = Date.now();
+    await store.putPlan(household.id, plan);
 
     req.session.userId = user.id;
     const payload = await mePayload(user, {
@@ -571,9 +582,17 @@ app.get('/api/me', requireAuth, async (req, res) => {
 // --- Plan (session-scoped) ---
 app.get('/api/plan', requireAuth, async (req, res) => {
   try {
-    const data = await store.getPlan(req.household.id);
+    let data = await store.getPlan(req.household.id);
     if (!data) return res.status(404).json({ error: 'not found' });
-    res.json({ data });
+    const members = await store.membersOf(req.household.id);
+    const merged = migrateLegacyPlan(data, members);
+    const changed = JSON.stringify(merged.people) !== JSON.stringify(data.people)
+      || JSON.stringify(merged.personMeta || {}) !== JSON.stringify(data.personMeta || {});
+    if (changed) {
+      merged._t = Math.max(data._t || 0, Date.now());
+      await store.putPlan(req.household.id, merged);
+    }
+    res.json({ data: merged });
   } catch (e) {
     console.error('GET plan error:', e.message);
     res.status(500).json({ error: 'server error' });
@@ -584,6 +603,14 @@ app.put('/api/plan', requireAuth, async (req, res) => {
   try {
     const data = req.body && req.body.data;
     if (!data || !Array.isArray(data.people)) return res.status(400).json({ error: 'bad payload' });
+    const old = await store.getPlan(req.household.id);
+    const members = await store.membersOf(req.household.id);
+    if (old) {
+      const check = validatePlanUpdate(old, data, req.user.id, members);
+      if (!check.ok) return res.status(403).json({ error: check.error });
+    } else {
+      data = mergeHouseholdMembers(data, members);
+    }
     await store.putPlan(req.household.id, data);
     res.json({ ok: true });
   } catch (e) {
@@ -597,12 +624,12 @@ app.get('/admin', (_req, res) => {
   res.sendFile(path.join(__dirname, 'admin.html'));
 });
 
-app.get('/api/admin/session', (req, res) => {
-  res.json({ ok: !!(req.session && req.session.isAdmin) });
+app.get('/api/admin/session', async (req, res) => {
+  res.json({ ok: await hasAdminAccess(req) });
 });
 
 app.post('/api/admin/login', (req, res) => {
-  if (!ADMIN_SECRET) return res.status(503).json({ error: 'admin not configured' });
+  if (!ADMIN_SECRET) return res.status(503).json({ error: 'admin secret not configured' });
   if (!adminRateLimit(req)) return res.status(429).json({ error: 'too many attempts' });
   const secret = req.body && req.body.secret;
   if (secret !== ADMIN_SECRET) return res.status(401).json({ error: 'invalid secret' });
